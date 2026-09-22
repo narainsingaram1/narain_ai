@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101118">
+  <title>narain.ai · your life, in focus</title>
+  <script>
+    (() => {
+      let stored = '';
+      try { stored = localStorage.getItem('orbit-theme') || ''; } catch {}
+      const mode = ['system', 'light', 'dark'].includes(stored) ? stored : 'system';
+      const light = mode === 'light' || (mode === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+      document.documentElement.dataset.theme = light ? 'light' : 'dark';
+      document.documentElement.dataset.themeMode = mode;
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">✦</div><div><strong>narain.ai</strong><small>PERSONAL OS</small></div></div>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav id="nav" aria-label="Main navigation">
+        <button class="nav-item active" data-view="today"><span>◫</span> Today</button>
+        <button class="nav-item" data-view="plan"><span>◷</span> Daily plan</button>
+        <button class="nav-item" data-view="tasks"><span>☑</span> Tasks</button>
+        <button class="nav-item" data-view="calendar"><span>▦</span> Calendar</button>
+        <button class="nav-item" data-view="notes"><span>▤</span> Notes</button>
+        <button class="nav-item" data-view="journal"><span>✎</span> Journal</button>
+        <button class="nav-item" data-view="goals"><span>◎</span> Goals</button>
+        <button class="nav-item" data-view="assistant"><span>✧</span> Ask Orbit</button>
+      </nav>
+      <div class="workspace-label areas-label">LIFE AREAS <button id="add-area" title="Add area" aria-label="Add life area">+</button></div>
+      <div id="areas-nav" class="areas-nav"></div>
+      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>Private workspace</strong><small>Stored on this Mac</small></div></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div class="crumb"><span>Workspace</span><span class="slash">/</span><strong id="crumb-current">Today</strong></div><div class="top-actions"><label class="theme-control" title="Color theme"><span class="theme-symbol" aria-hidden="true">◐</span><select id="theme-select" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="search-open" class="icon-button" title="Search" aria-label="Search">⌕</button><button id="new-main" class="primary-button">+ &nbsp; New entry</button></div></header>
+      <div id="content" class="content"></div>
+    </main>
+  </div>
+
+  <dialog id="editor" class="dialog"><form id="entry-form" method="dialog">
+    <div class="dialog-head"><div><div class="eyebrow">ADD TO YOUR WORKSPACE</div><h2 id="dialog-title">New entry</h2></div><button type="button" class="close" data-close="editor" aria-label="Close">×</button></div>
+    <div class="type-row" id="type-row">
+      <button type="button" data-type="task" class="selected">Task</button><button type="button" data-type="event">Event</button><button type="button" data-type="note">Note</button><button type="button" data-type="journal">Journal</button><button type="button" data-type="goal">Goal</button>
+    </div>
+    <label>Title<input id="entry-title" name="title" required maxlength="200" placeholder="What’s on your mind?"></label>
+    <label>Details<textarea id="entry-body" name="body" rows="4" placeholder="Context, next steps, thoughts…"></textarea></label>
+    <div class="field-grid"><label>Life area<select id="entry-area" name="area_id"></select></label><div id="class-field" class="hidden"><label>Class<select id="entry-class" name="class_id"><option value="">No class</option></select></label><button type="button" id="manage-classes-editor" class="tiny-link field-link">Manage classes →</button></div></div>
+    <div class="field-grid"><label id="date-label">Due date<input id="entry-date" name="date" type="datetime-local"></label><label id="end-label" class="hidden">Ends at<input id="entry-end" name="end" type="datetime-local"></label><label id="priority-label">Priority<select id="entry-priority" name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></label></div>
+    <div class="dialog-actions"><button type="button" class="quiet-button" data-close="editor">Cancel</button><button type="submit" class="primary-button">Save entry</button></div>
+  </form></dialog>
+
+  <dialog id="area-dialog" class="dialog small-dialog"><form id="area-form" method="dialog"><div class="dialog-head"><div><div class="eyebrow">MAKE IT YOURS</div><h2>New life area</h2></div><button type="button" class="close" data-close="area-dialog">×</button></div><label>Name<input name="name" required maxlength="50" placeholder="e.g. Relationships"></label><label>Color<input name="color" type="color" value="#8b7df8"></label><div class="dialog-actions"><button type="button" class="quiet-button" data-close="area-dialog">Cancel</button><button type="submit" class="primary-button">Create area</button></div></form></dialog>
+
+  <dialog id="classes-dialog" class="dialog small-dialog"><div class="dialog-head"><div><div class="eyebrow">ACADEMICS</div><h2>Manage classes</h2></div><button type="button" class="close" data-close="classes-dialog" aria-label="Close">×</button></div><p class="muted class-help">Add a class once, then link your tasks, notes, and events to it. Removing a class leaves its entries in place but unassigned.</p><div id="classes-list" class="classes-list"></div><form id="class-form"><label id="class-name-label">Add a class<input id="class-name" name="name" required maxlength="100" placeholder="e.g. CS 3600 · Artificial Intelligence"></label><div class="dialog-actions"><button type="button" id="cancel-class-edit" class="quiet-button hidden">Cancel edit</button><button type="submit" id="save-class" class="primary-button">Add class</button></div></form></dialog>
+
+  <dialog id="search-dialog" class="dialog search-dialog"><div class="search-box"><span>⌕</span><input id="search-input" placeholder="Search tasks, notes, goals, classes…" aria-label="Search records"><button type="button" class="close" data-close="search-dialog">×</button></div><div id="search-results"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
