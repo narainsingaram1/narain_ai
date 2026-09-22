@@ -38,7 +38,7 @@
     </aside>
 
     <main class="main">
-      <header class="topbar"><div class="crumb"><span>Workspace</span><span class="slash">/</span><strong id="crumb-current">Today</strong></div><div class="top-actions"><label class="theme-control" title="Color theme"><span class="theme-symbol" aria-hidden="true">◐</span><select id="theme-select" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="search-open" class="icon-button" title="Search" aria-label="Search">⌕</button><button id="new-main" class="primary-button">+ &nbsp; New entry</button></div></header>
+      <header class="topbar"><div class="crumb"><span>Workspace</span><span class="slash">/</span><strong id="crumb-current">Today</strong></div><div class="top-actions"><button id="ai-settings-open" class="icon-button" title="AI Settings (Ollama / Groq / OpenRouter)" aria-label="AI Settings">⚙</button><label class="theme-control" title="Color theme"><span class="theme-symbol" aria-hidden="true">◐</span><select id="theme-select" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="search-open" class="icon-button" title="Search" aria-label="Search">⌕</button><button id="new-main" class="primary-button">+ &nbsp; New entry</button></div></header>
       <div id="content" class="content"></div>
     </main>
   </div>
@@ -58,6 +58,29 @@
   <dialog id="area-dialog" class="dialog small-dialog"><form id="area-form" method="dialog"><div class="dialog-head"><div><div class="eyebrow">MAKE IT YOURS</div><h2>New life area</h2></div><button type="button" class="close" data-close="area-dialog">×</button></div><label>Name<input name="name" required maxlength="50" placeholder="e.g. Relationships"></label><label>Color<input name="color" type="color" value="#8b7df8"></label><div class="dialog-actions"><button type="button" class="quiet-button" data-close="area-dialog">Cancel</button><button type="submit" class="primary-button">Create area</button></div></form></dialog>
 
   <dialog id="classes-dialog" class="dialog small-dialog"><div class="dialog-head"><div><div class="eyebrow">ACADEMICS</div><h2>Manage classes</h2></div><button type="button" class="close" data-close="classes-dialog" aria-label="Close">×</button></div><p class="muted class-help">Add a class once, then link your tasks, notes, and events to it. Removing a class leaves its entries in place but unassigned.</p><div id="classes-list" class="classes-list"></div><form id="class-form"><label id="class-name-label">Add a class<input id="class-name" name="name" required maxlength="100" placeholder="e.g. CS 3600 · Artificial Intelligence"></label><div class="dialog-actions"><button type="button" id="cancel-class-edit" class="quiet-button hidden">Cancel edit</button><button type="submit" id="save-class" class="primary-button">Add class</button></div></form></dialog>
+
+  <dialog id="ai-settings-dialog" class="dialog small-dialog">
+    <div class="dialog-head"><div><div class="eyebrow">INTELLIGENCE SETTINGS</div><h2>Orbit AI Engine</h2></div><button type="button" class="close" data-close="ai-settings-dialog" aria-label="Close">×</button></div>
+    <div class="settings-content" style="display:flex;flex-direction:column;gap:12px;margin:12px 0;">
+      <div id="ai-current-badge" style="padding:10px 14px;border-radius:8px;background:rgba(139,125,248,0.1);border:1px solid rgba(139,125,248,0.3);font-size:13px;">
+        Active engine: <strong id="ai-provider-label">Loading...</strong>
+      </div>
+      <label>Groq API Key <small style="opacity:0.7">(100% free cloud accelerator)</small>
+        <input id="ai-groq-key" type="password" placeholder="gsk_... (leave empty for local Ollama)" autocomplete="off">
+      </label>
+      <label>OpenRouter API Key <small style="opacity:0.7">(optional)</small>
+        <input id="ai-openrouter-key" type="password" placeholder="sk-or-v1-... (optional)" autocomplete="off">
+      </label>
+      <label>Local Ollama Model
+        <input id="ai-ollama-model" placeholder="qwen3.5:4b">
+      </label>
+      <p class="muted" style="font-size:12px;margin:0;">Without cloud keys, Orbit runs 100% free, private, and unlimited on local Ollama. Conversational commands execute instantly via Fast-Path.</p>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="quiet-button" data-close="ai-settings-dialog">Close</button>
+      <button type="button" id="ai-save-settings" class="primary-button">Save Settings</button>
+    </div>
+  </dialog>
 
   <dialog id="search-dialog" class="dialog search-dialog"><div class="search-box"><span>⌕</span><input id="search-input" placeholder="Search tasks, notes, goals, classes…" aria-label="Search records"><button type="button" class="close" data-close="search-dialog">×</button></div><div id="search-results"></div></dialog>
   <div id="toast" role="status" aria-live="polite"></div>

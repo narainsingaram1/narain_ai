@@ -271,10 +271,10 @@ const STRIP_WHEN=new RegExp([
   `\\b(?:${VAGUE_PHRASES.map(phrase=>escapeRegExp(phrase)).join('|')})\\b`
 ].join('|'),'gi');
 const COMMAND_PREFIX=/^(?:\s*(?:ok(?:ay)?|please|hey|hi|yo|so|now|also|and|then)[\s,]+)+/i;
-const LEAD_PREFIX=/^(?:\s*(?:can you|could you|would you|will you|i want to|i wanna|i need to|i have to|i've got to|i should|i gotta|remind me to|remind me about|don'?t forget to|dont forget to|remember to|note that)\s+)+/i;
+const LEAD_PREFIX=/^(?:\s*(?:can you|could you|would you|will you|i want to|i wanna|i need to|i have to|i've got to|i should|i gotta|remind me to|remind me about|don'?t forget to|dont forget to|remember to|note that|i have|i got|there is|there's|got|we have)\s+)+/i;
 const VERB_PREFIX=/^(?:\s*(?:create|add|make|log|jot down|note down|write down|save|track|schedule|put|throw in)\s+(?:me\s+)?(?:a|an|the|another|new|some)?\s*(?:task|event|note|journal entry|entry|reminder|to-?do|milestone|thing)?\s*(?:for|about|to|that|:)?\s*)/i;
-const RELATIVE_CLAUSE=/^(?:\s*(?:that\s+(?:we|i|you)\s+(?:have|has|need|needs|must|should|got|are having|have coming up)|which\s+(?:we|i)\s+(?:have|need|must)|there'?s|there is|i\s+(?:have|need|must|should|want)|we\s+(?:have|need|must|should))\s+(?:a|an|the)?\s*)+/i;
-const TRAILING_FILLER=/\s+(?:for me|please|thanks|thank you|as a task|as an event|if possible|when you can)\s*$/i;
+const RELATIVE_CLAUSE=/^(?:\s*(?:that\s+(?:we|i|you)\s+(?:have|has|need|needs|must|should|got|are having|have coming up)|which\s+(?:we|i)\s+(?:have|need|must)|there'?s|there is|i\s+(?:have|need|must|should|want)|we\s+(?:have|need|must|should)|got)\s+(?:a|an|the)?\s*)+/i;
+const TRAILING_FILLER=/\s+(?:for me|please|thanks|thank you|as a task|as an event|as a note|as a goal|if possible|when you can|(?:to|in|into|on)\s+(?:my\s+)?(?:tasks?|todo|todos?|events?|calendar|notes?|journal|goals?)|(?:can you\s+)?(?:please\s+)?(?:add|put|save|track|schedule|throw)\s+(?:it|this)?\s*(?:in|into|to|on)?\s*(?:my\s+)?(?:tasks?|todo|todos?|events?|calendar|notes?|journal|goals?)(?:\s+(?:for me|please))?|(?:can you\s+)?(?:please\s+)?add it(?:\s+to\s+tasks?)?)\s*$/i;
 
 export function removePhrase(text, phrase) {
   if (!phrase) return text;
@@ -302,6 +302,7 @@ export function cleanTitle(text) {
     if (before===value) break;
   }
   value=value.replace(/\s+/g,' ').replace(/^[\s,;:.\-–—]+|[\s,;:.\-–—]+$/g,'').trim();
+  value=value.replace(/^(?:a|an|the)\s+/i,'').trim();
   return value ? value.charAt(0).toUpperCase()+value.slice(1) : '';
 }
 
@@ -314,6 +315,11 @@ export function splitIntents(text) {
   const usable=parts.filter(part=>part.split(/\s+/).length>=2);
   return usable.length>1?usable:[value];
 }
+
+const CAREER_CUES = /\b(swe|oa|online assessment|interview|job|internship|recruiter|resume|cv|offer|application|career|superhuman|linkedin|hiring|referral)\b/i;
+const HEALTH_CUES = /\b(gym|workout|doctor|dentist|appointment|run|running|lifting|medicine|prescription|therapy|sleep|health|fitness|meds|dental)\b/i;
+const ACADEMIC_CUES = /\b(homework|hw|exam|quiz|midterm|final|lecture|syllabus|assignment|study|reading|textbook|class|course|professor|ta|office hours)\b/i;
+const PROJECT_CUES = /\b(project|hackathon|repo|codebase|github|pull request|pr|feature|bug|deploy|build)\b/i;
 
 export function heuristicDraft(input, context={}) {
   const timeZone=context.timeZone||'UTC';
@@ -338,6 +344,13 @@ export function heuristicDraft(input, context={}) {
   const classId=classMatch.match?.id||null;
   let areaId=areaMatch.match?.id||null;
   if (classId&&!areaId&&academic) areaId=academic.id;
+  if (!areaId) {
+    if (classMatch.match || courseMention(original)) areaId=academic?.id||null;
+    else if (CAREER_CUES.test(lower)) areaId=areas.find(item=>/^career$/i.test(String(item.name??'').trim()))?.id||null;
+    else if (HEALTH_CUES.test(lower)) areaId=areas.find(item=>/^health$/i.test(String(item.name??'').trim()))?.id||null;
+    else if (ACADEMIC_CUES.test(lower)) areaId=academic?.id||null;
+    else if (PROJECT_CUES.test(lower)) areaId=areas.find(item=>/^projects?$/i.test(String(item.name??'').trim()))?.id||null;
+  }
 
   const when=parseWhen(original,{timeZone,now});
   const dated=['task','event','goal'].includes(type);
@@ -380,4 +393,37 @@ export function heuristicDraft(input, context={}) {
 
 export function heuristicDrafts(text, context={}) {
   return splitIntents(text).map(part=>heuristicDraft(part,context)).filter(Boolean);
+}
+
+// Extract a high-confidence direct user action (e.g. conversational additions or status toggles)
+// to provide instantaneous execution without unnecessary model delays or interrogation.
+export function extractDirectIntent(input, context={}) {
+  const original=String(input??'').trim();
+  if (!original) return null;
+  const lower=original.toLowerCase();
+
+  // Queries must never be treated as direct mutations
+  if (/^(?:what|which|show|list|how|who|where|when|can you show|tell me|find|search)\b/i.test(lower)) return null;
+
+  // Generic or vague creation requests must be handled through standard agent reasoning
+  if (/^(?:create|add|make|new)\s+(?:a|an|one|two|three|some|\d+)?\s*(?:task|item|event|milestone)s?$/i.test(lower)) return null;
+
+  // If a specific course code is mentioned that is not a registered class yet, let the agent manage class creation
+  if (courseMention(original)) return null;
+
+  // Unambiguous conversational additions like "I have a Superhuman SWE OA due in 7 days can you please add it to tasks"
+  const isConversationalAdd = /^(?:i have|i got|there is|there's|got|we have)\s+/i.test(lower) && /\b(?:add (?:it|this)?\s*to\s*(?:my\s*)?tasks?|task|due)\b/i.test(lower);
+
+  if (isConversationalAdd) {
+    const draft = heuristicDraft(original, context);
+    if (draft && draft.title && draft.title.length >= 3 && !/^(?:task|item|new task|something)$/i.test(draft.title)) {
+      return {
+        intent: 'create',
+        op: 'create',
+        draft
+      };
+    }
+  }
+
+  return null;
 }

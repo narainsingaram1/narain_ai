@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWhen, heuristicDrafts, matchEntity, normalizeName, splitIntents, zonedStamp } from '../parse.mjs';
+import { parseWhen, heuristicDrafts, matchEntity, normalizeName, splitIntents, zonedStamp, extractDirectIntent } from '../parse.mjs';
 
 const timeZone='America/New_York';
 const now=new Date('2026-09-22T14:00:00Z'); // Tuesday 10:00 in New York
@@ -98,4 +98,30 @@ test('normalised names ignore punctuation, spacing and case', () => {
 test('zoned stamps carry the exact offset for the workspace time zone', () => {
   assert.equal(zonedStamp('America/New_York',{year:2026,month:9,day:25,hour:18,minute:0,second:0}),'2026-09-25T18:00:00-04:00');
   assert.equal(zonedStamp('America/New_York',{year:2026,month:1,day:25,hour:18,minute:0,second:0}),'2026-01-25T18:00:00-05:00');
+});
+
+test('conversational prompt extracts clean title, due date, and infers career area', () => {
+  const careerWorkspace = {
+    ...workspace,
+    areas: [...workspace.areas, { id: 'area-career', name: 'Career' }]
+  };
+  const [draft] = heuristicDrafts('I have a Superhuman SWE OA due in 7 days can you please add it to tasks', careerWorkspace);
+  assert.equal(draft.type, 'task');
+  assert.equal(draft.title, 'Superhuman SWE OA');
+  assert.equal(draft.area_id, 'area-career');
+  assert.equal(draft.due_at, '2026-09-29T09:00:00-04:00');
+  assert.deepEqual(draft.needs, []);
+});
+
+test('extractDirectIntent identifies unambiguous conversational task creation', () => {
+  const careerWorkspace = {
+    ...workspace,
+    areas: [...workspace.areas, { id: 'area-career', name: 'Career' }]
+  };
+  const direct = extractDirectIntent('I have a Superhuman SWE OA due in 7 days can you please add it to tasks', careerWorkspace);
+  assert.ok(direct);
+  assert.equal(direct.intent, 'create');
+  assert.equal(direct.draft.title, 'Superhuman SWE OA');
+  assert.equal(direct.draft.area_id, 'area-career');
+  assert.equal(direct.draft.due_at, '2026-09-29T09:00:00-04:00');
 });
