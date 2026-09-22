@@ -29,7 +29,7 @@ test('local workspace CRUD, grounded assistant, and complete export', async () =
     assert.equal(invalid.status,400);
     const created=await request('/api/items','POST',{type:'task',title:'Finish AI assignment',body:'Read search notes',area_id:area.id,class_id:addedClass.data.id,due_at:'2026-09-24T18:00:00.000Z',priority:'high'});
     assert.equal(created.status,201);assert.equal(created.data.class_name,'CS 3600');
-    const answer=await request('/api/assistant','POST',{question:'What about CS 3600?'});
+    const answer=await request('/api/assistant','POST',{question:'What about CS 3600?',mode:'search'});
     assert.equal(answer.status,200);assert.equal(answer.data.sources[0].id,created.data.id);
     const renamed=await request(`/api/classes/${addedClass.data.id}`,'PATCH',{name:'CS 3600 · Artificial Intelligence'});
     assert.equal(renamed.status,200);
@@ -37,7 +37,10 @@ test('local workspace CRUD, grounded assistant, and complete export', async () =
     const cleared=await request(`/api/items/${created.data.id}`,'PATCH',{due_at:null,status:'done'});
     assert.equal(cleared.status,200);assert.equal(cleared.data.due_at,null);assert.equal(cleared.data.status,'done');
     const exported=await request('/api/export');
-    assert.equal(exported.status,200);assert.equal(exported.data.schema_version,2);assert.equal(exported.data.items.length,1);assert.equal(exported.data.classes.length,1);
+    assert.equal(exported.status,200);assert.equal(exported.data.schema_version,3);assert.equal(exported.data.items.length,1);assert.equal(exported.data.classes.length,1);
+    const milestone=await request('/api/items','POST',{type:'task',title:'Outline solution',parent_id:created.data.id});
+    assert.equal(milestone.status,201);assert.equal(milestone.data.parent_title,'Finish AI assignment');
+    assert.equal((await request(`/api/items/${milestone.data.id}`,'DELETE')).status,200);
     const deletedClass=await request(`/api/classes/${addedClass.data.id}`,'DELETE');
     assert.equal(deletedClass.status,200);
     const unassigned=(await request('/api/state')).data.items[0];

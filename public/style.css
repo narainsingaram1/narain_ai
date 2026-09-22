@@ -133,6 +133,7 @@ html[data-theme="light"] .mini-item small { color: var(--theme-muted); }
 html[data-theme="light"] .event-date { border-color: var(--theme-border); }
 html[data-theme="light"] .chat-bubble { background: var(--theme-accent-surface); color: var(--theme-text); border: 1px solid #ded8f6; }
 html[data-theme="light"] .chat-bubble.user { background: var(--theme-accent-soft); }
+.agent-changes{display:grid;gap:8px;margin-top:12px}.agent-change{display:grid;gap:3px;padding:10px 12px;border:1px solid #6d618d;border-radius:9px;background:#191727;white-space:normal}.agent-change strong{font-size:11px}.agent-change span{font-size:11px;color:#c7c2d7;overflow-wrap:anywhere}.agent-change small{color:#8e8a9c}.agent-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.agent-actions button{font-size:11px}html[data-theme="light"] .agent-change{background:#f8f6ff;border-color:#d7d0ef}html[data-theme="light"] .agent-change span{color:#515067}
 html[data-theme="light"] .chat-sources button { border-color: #b8afea; background: var(--theme-accent-soft); color: var(--theme-accent-strong); }
 html[data-theme="light"] .suggestions button { background: var(--theme-surface-muted); border-color: var(--theme-border); color: var(--theme-text-soft); }
 html[data-theme="light"] .suggestions button:hover { border-color: #aaa0e6; }
