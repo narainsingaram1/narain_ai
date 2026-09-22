@@ -23,7 +23,7 @@ function applyTheme(mode = storedTheme()) {
 applyTheme();
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state = { areas:[], classes:[], items:[], view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false };
+const state = { areas:[], classes:[], items:[], view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false,agentRun:null };
 const labels = {today:'Today',plan:'Daily plan',tasks:'Tasks',calendar:'Calendar',notes:'Notes',journal:'Journal',goals:'Goals',assistant:'Ask Orbit'};
 const singular = {tasks:'task',plan:'event',notes:'note',journal:'journal',goals:'goal',calendar:'event'};
 const dateKey = dayKey;
@@ -179,8 +179,8 @@ function listView(type){const title=labels[state.view];let items=filtered(type);
 else if(type==='event')content=`<div class="list-toolbar"><span class="muted">${items.length} events</span><button class="tiny-link" data-new="event">+ Add event</button></div><div class="calendar-list">${items.length?items.sort((a,b)=>(a.starts_at||'').localeCompare(b.starts_at||'')).map(x=>`<div class="event-card" data-edit="${x.id}"><div class="event-date"><strong>${new Date(x.starts_at).getDate()}</strong><small>${new Date(x.starts_at).toLocaleDateString(undefined,{month:'short'})}</small></div><div class="event-body"><strong>${escapeHtml(x.title)}</strong><small>${fmtTime(x.starts_at)}${x.ends_at?' – '+fmtTime(x.ends_at):''}${x.class_name?' · '+escapeHtml(x.class_name):''}</small></div>${areaTag(x)}</div>`).join(''):empty('No events yet. Build your schedule by adding one.')}</div>`;
 else content=`<div class="list-toolbar"><span class="muted">${items.length} ${title.toLowerCase()} ${items.length===1?'entry':'entries'}</span><button class="tiny-link" data-new="${type}">+ Add ${type}</button></div><div class="note-grid">${items.length?items.map(x=>`<article class="note-card ${type==='goal'?'goal-card':''}" data-edit="${x.id}"><div class="note-icon">${type==='journal'?'✎':type==='goal'?'◎':'▤'}</div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.body||'No details yet')}</p><footer>${escapeHtml(x.area_name||'Uncategorized')} · ${fmtDate(itemDate(x))}</footer></article>`).join(''):empty(`No ${title.toLowerCase()} yet. Capture your first one.`)}</div>`;
 return `<div class="hero"><div><div class="eyebrow">${state.area?escapeHtml(area(state.area)?.name||'LIFE AREA'):'YOUR WORKSPACE'}</div><h1 class="page-title">${title}<span style="color:#a797f6">.</span></h1><p class="muted section-desc">${intro}</p></div></div>${content}`}
-function assistantView(){return `<div class="hero"><div><div class="eyebrow">LOCAL WORKSPACE AGENT</div><h1 class="page-title">Ask Orbit<span style="color:#a797f6">.</span></h1><p class="muted">Ask Orbit to find, create, or change your records. Grouped edits and deletions get a preview.</p></div></div><div class="assistant-layout"><section class="card ask-card"><div class="card-head"><h2>Your workspace agent</h2><span class="badge">Local model</span></div><div id="chat-log" class="chat-log" aria-live="polite">${state.chat.length?state.chat.map(chatMarkup).join(''):'<div class="chat-bubble answer">Tell me what to change, or ask about your saved workspace.</div>'}</div><form id="ask-form" class="ask-form"><input name="question" maxlength="500" required placeholder="Move my CS 2110 tasks to tomorrow…" aria-label="Ask Orbit"><button class="primary-button">Ask →</button></form></section><section class="card"><div class="card-head"><h2>Try asking</h2></div><div class="suggestions"><button data-ask="What should I focus on today?">What should I focus on today?</button><button data-ask="Break down Project 2 into four milestones">Break down Project 2 into four milestones</button><button data-ask="Show my open CS 2110 tasks">Show my open CS 2110 tasks</button></div><p class="muted" style="margin-top:20px">Runs through Ollama on this computer. Check dates and details in the change preview before applying a batch.</p></section></div>`}
-function render(){renderNav();$('#content').innerHTML=state.view==='today'?todayView():state.view==='assistant'?assistantView():state.view==='calendar'?calendarView():state.view==='plan'?planView():`${isAcademic(state.area)?`<div class="academic-tools"><span>${state.classes.length} ${state.classes.length===1?'class':'classes'} in Academics</span><button data-manage-classes>Manage classes →</button></div>`:''}${state.view==="tasks"?taskView():listView(singular[state.view])}`;}
+function assistantView(){return '<div class="hero agent-hero"><div class="agent-hero-copy"><div class="eyebrow">LOCAL WORKSPACE AGENT</div><h1 class="page-title">Ask Orbit<span style="color:#a797f6">.</span></h1><p class="muted">A private workspace agent for finding records, shaping plans, and making careful changes.</p></div><div class="agent-hero-badge"><span class="agent-hero-orb" aria-hidden="true">✦</span><div><strong>Private by default</strong><small>Local workspace · Ollama</small></div></div></div><div class="assistant-layout agent-layout"><section class="card ask-card agent-card"><header class="agent-header"><div class="agent-avatar" aria-hidden="true"><span>✦</span><i></i></div><div class="agent-header-copy"><h2>Workspace agent</h2><p>Grounded in the records you saved here</p></div><span class="agent-local-badge"><span class="agent-status-dot"></span>'+(state.agentBusy?'Working':'Ready')+'</span></header><div id="agent-activity" class="agent-activity" aria-live="polite"></div><div id="chat-log" class="chat-log" aria-live="polite">'+(state.chat.length?state.chat.map(chatMarkup).join(''):'<div class="chat-bubble answer welcome-bubble"><div class="markdown-content"><p>Tell me what you want to find, plan, or change.</p><ul><li>Ask about deadlines or focus</li><li>Ask me to create or update records</li><li>Review a change before it is applied</li></ul></div></div>')+'</div><form id="ask-form" class="ask-form"><div class="agent-input-wrap"><span aria-hidden="true">⌘</span><input name="question" maxlength="500" required placeholder="Ask Orbit to find, plan, or change something…" aria-label="Ask Orbit"></div><button class="primary-button" type="submit">Ask Orbit <span aria-hidden="true">↗</span></button></form></section><aside class="card agent-side-card"><div class="card-head"><div><div class="eyebrow">SHORTCUTS</div><h2>Start with something specific</h2></div><span class="badge">Local</span></div><div class="suggestions agent-suggestions"><button data-ask="What should I focus on today?"><span class="suggestion-icon">✦</span><span><strong>Focus for today</strong><small>Surface the work that deserves attention</small></span><b>↗</b></button><button data-ask="Break down Project 2 into four milestones"><span class="suggestion-icon">⌘</span><span><strong>Break down a project</strong><small>Turn one task into linked milestones</small></span><b>↗</b></button><button data-ask="Show my open CS 2110 tasks"><span class="suggestion-icon">⌕</span><span><strong>Find a set of records</strong><small>Search across tasks, notes, and events</small></span><b>↗</b></button></div><div class="agent-side-divider"></div><div class="agent-flow"><div><span>01</span><strong>Orbit reads</strong><small>Searches your saved workspace first.</small></div><div><span>02</span><strong>Orbit reasons</strong><small>Uses tools to verify exact records.</small></div><div><span>03</span><strong>You stay in control</strong><small>Grouped changes wait for your approval.</small></div></div><div class="agent-privacy"><span>◉</span><p><strong>Nothing leaves this Mac.</strong><small>Orbit uses your local records and local model connection.</small></p></div></aside></div>'}
+function render(){renderNav();$('#content').innerHTML=state.view==='today'?todayView():state.view==='assistant'?assistantView():state.view==='calendar'?calendarView():state.view==='plan'?planView():`${isAcademic(state.area)?`<div class="academic-tools"><span>${state.classes.length} ${state.classes.length===1?'class':'classes'} in Academics</span><button data-manage-classes>Manage classes →</button></div>`:''}${state.view==="tasks"?taskView():listView(singular[state.view])}`;renderAgentActivity();setAgentBusyUI()}
 function navigate(view,areaId=null){state.view=view;state.area=areaId;render();window.scrollTo(0,0)}
 function toggleFields(){const type=state.entryType;$('#date-label').firstChild.textContent=type==='event'?'Starts at':type==='goal'?'Target date':'Due date';$('#date-label').classList.toggle('hidden',['note','journal'].includes(type));$('#end-label').classList.toggle('hidden',type!=='event');$('#priority-label').classList.toggle('hidden',type!=='task');document.querySelectorAll('#type-row button').forEach(b=>b.classList.toggle('selected',b.dataset.type===type));$('#entry-title').placeholder={task:'What needs to get done?',event:'What is happening?',note:'What is this note about?',journal:'How was your day?',goal:'What are you working toward?'}[type]}
 function openEditor(type='task',item=null,day=null,hour=9){state.editing=item?.id||null;state.entryType=item?.type||type;$('#entry-form').reset();$('#entry-area').innerHTML='<option value="">No area</option>'+state.areas.map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');$('#dialog-title').textContent=item?'Edit entry':'New entry';$('#entry-title').value=item?.title||'';$('#entry-body').value=item?.body||'';$('#entry-area').value=item?.area_id||state.area||'';renderClassOptions(item?.class_id||'');showClassField();$('#entry-priority').value=item?.priority||'medium';$('#entry-date').value=localInput(item?.type==='event'?item?.starts_at:item?.due_at);$('#entry-end').value=localInput(item?.ends_at);if(type==='event'&&!item){const planDate=state.view==='plan'?state.planDay:dayKey(new Date());const start=fromDayKey(day||(state.view==='calendar'?state.selectedDay:planDate));start.setHours(hour,0,0,0);$('#entry-date').value=localInput(start);$('#entry-end').value=localInput(new Date(start.getTime()+3600000))}toggleFields();$('#editor').showModal();$('#entry-title').focus()}
@@ -190,11 +190,141 @@ async function toggleTask(id){const item=state.items.find(x=>x.id===id);if(!item
 async function deleteItem(id){const item=state.items.find(x=>x.id===id);if(!item||!confirm(`Delete “${item.title}”? This cannot be undone.`))return;try{await api(`/api/items/${id}`,{method:'DELETE'});await refresh();toast('Entry deleted')}catch(err){toast(err.message)}}
 async function saveClass(e){e.preventDefault();const name=$('#class-name').value.trim();if(!name)return;try{const saved=await api(state.editingClass?`/api/classes/${state.editingClass}`:'/api/classes',{method:state.editingClass?'PATCH':'POST',body:JSON.stringify({name})});const wasEditing=Boolean(state.editingClass);state.editingClass=null;$('#class-form').reset();$('#class-name-label').firstChild.textContent='Add a class';$('#save-class').textContent='Add class';$('#cancel-class-edit').classList.add('hidden');await refresh();if($('#editor').open&&isAcademic($('#entry-area').value))$('#entry-class').value=saved.id;toast(wasEditing?'Class renamed':'Class added')}catch(err){toast(err.message)}}
 async function removeClass(id){const found=state.classes.find(c=>c.id===id);if(!found)return;const count=state.items.filter(x=>x.class_id===id).length;if(!confirm(`Remove “${found.name}”? ${count} linked ${count===1?'entry':'entries'} will stay, but will no longer have a class.`))return;try{await api(`/api/classes/${id}`,{method:'DELETE'});await refresh();toast('Class removed; entries kept')}catch(err){toast(err.message)}}
+
+function inlineMarkdown(value) {
+  return escapeHtml(value)
+    .replace(/\x60([^\x60\n]+)\x60/g,'<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/__([^_]+)__/g,'<strong>$1</strong>')
+    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g,'<em>$1</em>')
+    .replace(/(?<!_)_([^_\n]+)_(?!_)/g,'<em>$1</em>');
+}
+function renderMarkdown(source='') {
+  const lines=String(source??'').split(/\r?\n/);
+  let html='',paragraph=[],listType=null,codeLines=null,codeLanguage='';
+  const closeList=()=>{if(listType){html+=listType==='ul'?'</ul>':'</ol>';listType=null}};
+  const flushParagraph=()=>{if(paragraph.length){html+='<p>'+inlineMarkdown(paragraph.join(' '))+'</p>';paragraph=[]}};
+  for (const rawLine of lines) {
+    const line=rawLine.trimEnd();
+    const fence=line.match(/^\x60\x60\x60([\w-]*)\s*$/);
+    if (fence) {
+      if (codeLines!==null) {html+='<pre><code'+(codeLanguage?' class="language-'+escapeHtml(codeLanguage)+'"':'')+'>'+escapeHtml(codeLines.join('\n'))+'</code></pre>';codeLines=null;codeLanguage=''}
+      else {flushParagraph();closeList();codeLines=[];codeLanguage=fence[1]||''}
+      continue;
+    }
+    if (codeLines!==null) {codeLines.push(rawLine);continue}
+    if (!line.trim()) {flushParagraph();closeList();continue}
+    const heading=line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {flushParagraph();closeList();html+='<h'+heading[1].length+'>'+inlineMarkdown(heading[2])+'</h'+heading[1].length+'>';continue}
+    const bullet=line.match(/^[-*]\s+(.+)$/);
+    if (bullet) {flushParagraph();if(listType!=='ul'){closeList();html+='<ul>';listType='ul'}html+='<li>'+inlineMarkdown(bullet[1])+'</li>';continue}
+    const ordered=line.match(/^\d+[.)]\s+(.+)$/);
+    if (ordered) {flushParagraph();if(listType!=='ol'){closeList();html+='<ol>';listType='ol'}html+='<li>'+inlineMarkdown(ordered[1])+'</li>';continue}
+    closeList();paragraph.push(line.trim());
+  }
+  if (codeLines!==null) html+='<pre><code'+(codeLanguage?' class="language-'+escapeHtml(codeLanguage)+'"':'')+'>'+escapeHtml(codeLines.join('\n'))+'</code></pre>';
+  flushParagraph();closeList();
+  return html||'<p class="markdown-empty">Orbit is composing…</p>';
+}
+let chatRenderQueued=false;
+let agentTimer=null;
+function renderChat() {
+  const box=$('#chat-log');
+  if (!box) return;
+  box.innerHTML=state.chat.map(chatMarkup).join('');
+  box.scrollTop=box.scrollHeight;
+}
+function scheduleChatRender() {
+  if (chatRenderQueued) return;
+  chatRenderQueued=true;
+  setTimeout(()=>{chatRenderQueued=false;renderChat()},16);
+}
+function renderAgentActivity() {
+  const panel=$('#agent-activity');
+  const run=state.agentRun;
+  if (!panel) return;
+  if (!run) {panel.innerHTML='';panel.classList.remove('is-active');return}
+  const running=run.status==='running';
+  const elapsed=((run.completedAt||Date.now())-run.startedAt)/1000;
+  const stateLabel=running?'Orbit is working locally':run.status==='error'?'Run stopped':'Run complete';
+  const steps=run.steps.slice(-6).map(step=>'<div class="agent-step '+(step.state||'done')+'"><span class="agent-step-icon" aria-hidden="true">'+(step.state==='running'?'◌':step.state==='error'?'!':'✓')+'</span><span><strong>'+escapeHtml(step.label)+'</strong>'+(step.detail?'<small>'+escapeHtml(step.detail)+'</small>':'')+'</span></div>').join('');
+  panel.classList.toggle('is-active',running);
+  panel.innerHTML='<div class="agent-activity-head"><span class="agent-pulse '+(running?'is-running':run.status==='error'?'is-error':'is-done')+'" aria-hidden="true"></span><div><strong>'+escapeHtml(run.phase||'Orbit is ready')+'</strong><small>'+stateLabel+'</small></div><time>'+elapsed.toFixed(1)+'s</time></div>'+(steps?'<div class="agent-steps">'+steps+'</div>':'');
+}
+function setAgentBusyUI() {
+  const form=$('#ask-form');
+  if (!form) return;
+  const input=form.querySelector('input');
+  const button=form.querySelector('button');
+  if (input) input.disabled=state.agentBusy;
+  if (button) {button.disabled=state.agentBusy;button.innerHTML=state.agentBusy?'<span class="button-spinner" aria-hidden="true"></span> Working…':'Ask Orbit <span aria-hidden="true">↗</span>'}
+}
+function updateAgentRun(event) {
+  const run=state.agentRun;
+  if (!run) return;
+  if (event.type==='start') run.phase='Orbit is online';
+  if (event.type==='phase') run.phase=event.label||'Working through the request';
+  if (event.type==='tool') {
+    let step=null;
+    for (let i=run.steps.length-1;i>=0;i--) if (run.steps[i].name===event.name&&run.steps[i].state==='running') {step=run.steps[i];break}
+    if (!step) {step={name:event.name,label:event.label||'Workspace tool',state:'running'};run.steps.push(step)}
+    step.state=event.state||step.state;
+    step.label=event.label||step.label;
+    step.detail=event.detail||'';
+    if (step.state==='running') run.phase=step.label;
+    else if (step.state==='error') run.phase='Needs attention';
+    else run.phase=step.detail||'Workspace check complete';
+  }
+  if (event.type==='done'&&run.status==='running') {run.phase='Run complete';run.status='complete';run.completedAt=Date.now()}
+  if (event.type==='error') {run.phase='Run stopped';run.status='error';run.completedAt=Date.now()}
+  renderAgentActivity();
+}
+function receiveAgentEvent(event,live) {
+  if (!event||!live) return;
+  if (event.type==='token') {live.message+=(event.text||'');live.streaming=true;updateAgentRun(event);scheduleChatRender();return}
+  if (event.type==='answer') {live.message=event.answer||live.message;live.sources=event.sources||[];live.changes=event.proposal?.changes||event.changes||[];live.proposal=event.proposal?.token||null;live.streaming=false;updateAgentRun(event);renderChat();return}
+  if (event.type==='error') {live.message=event.error||'The local agent could not complete the request.';live.error=true;live.streaming=false;updateAgentRun(event);renderChat();return}
+  updateAgentRun(event);
+}
+function beginAgentRun() {
+  clearInterval(agentTimer);
+  state.agentRun={phase:'Starting Orbit',steps:[],startedAt:Date.now(),status:'running'};
+  document.body.classList.add('agent-is-running');
+  agentTimer=setInterval(renderAgentActivity,250);
+  renderAgentActivity();setAgentBusyUI();
+}
+function endAgentRun() {
+  clearInterval(agentTimer);agentTimer=null;
+  if (state.agentRun&&state.agentRun.status==='running') {state.agentRun.status='complete';state.agentRun.phase='Run complete';state.agentRun.completedAt=Date.now()}
+  document.body.classList.remove('agent-is-running');
+  renderAgentActivity();setAgentBusyUI();
+}
+async function streamAsk(question,live) {
+  const response=await fetch('/api/assistant/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question})});
+  if (!response.ok) {let data={};try{data=await response.json()}catch{}throw new Error(data.error||'The local agent could not start.')}
+  if (!response.body || response.headers.get('content-type')?.includes('application/json')) {
+    const result=await response.json();receiveAgentEvent({type:'answer',...result},live);receiveAgentEvent({type:'done'},live);return;
+  }
+  const reader=response.body.getReader();
+  const decoder=new TextDecoder();
+  let buffer='';
+  const consume=line=>{if(!line.trim())return;try{receiveAgentEvent(JSON.parse(line),live)}catch{}};
+  while (true) {
+    const {value,done}=await reader.read();
+    buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});
+    const lines=buffer.split('\n');buffer=lines.pop()||'';
+    for (const line of lines) consume(line);
+    if (done) break;
+  }
+  if (buffer.trim()) consume(buffer);
+}
+
 function agentField(key,value){if(key==='parent_id'&&value)return state.items.find(x=>x.id===value)?.title||value;if(key==='area_id'&&value)return state.areas.find(x=>x.id===value)?.name||value;if(key==='class_id'&&value)return state.classes.find(x=>x.id===value)?.name||value;if(['due_at','starts_at','ends_at'].includes(key)&&value)return new Date(value).toLocaleString();return value??'cleared'}
 function changeMarkup(change){const fields=['title','body','due_at','starts_at','ends_at','status','priority','area_id','class_id','parent_id'];const before=change.before||{},after=change.after||change;const diffs=fields.filter(k=>change.op==='create'?after[k]:before[k]!==after[k]);return `<div class="agent-change"><strong>${escapeHtml(change.op.toUpperCase())} · ${escapeHtml(after.title||change.title||before.title)}</strong>${diffs.map(k=>`<span>${escapeHtml(k.replaceAll('_',' '))}: ${escapeHtml(agentField(k,after[k]))}${change.op==='update'?` <small>(was ${escapeHtml(agentField(k,before[k]))})</small>`:''}</span>`).join('')}</div>`}
-function chatMarkup(entry){return `<div class="chat-bubble ${entry.kind}">${escapeHtml(entry.message)}${entry.sources?.length?`<div class="chat-sources">${entry.sources.map(x=>`<button data-edit="${escapeHtml(x.id)}">${escapeHtml(x.title)}</button>`).join('')}</div>`:''}${entry.changes?.length?`<div class="agent-changes">${entry.changes.map(changeMarkup).join('')}</div>`:''}${entry.proposal?`<div class="agent-actions"><button class="primary-button" data-apply-proposal="${escapeHtml(entry.proposal)}">Apply these changes</button><button class="quiet-button" data-dismiss-proposal="${escapeHtml(entry.proposal)}">Discard</button></div>`:''}</div>`}
-function appendChat(kind,message,sources=[],changes=[],proposal=null){state.chat.push({kind,message,sources,changes,proposal});const box=$('#chat-log');if(box){box.innerHTML=state.chat.map(chatMarkup).join('');box.scrollTop=box.scrollHeight}}
-async function ask(question){if(!question?.trim()||state.agentBusy)return;state.agentBusy=true;appendChat('user',question);const input=$('#ask-form input');input.value='';input.disabled=true;appendChat('answer','Orbit is reading your workspace…');try{const result=await api('/api/assistant',{method:'POST',body:JSON.stringify({question})});state.chat.pop();appendChat('answer',result.answer,result.sources,result.proposal?.changes||result.changes,result.proposal?.token);if(result.changes?.length)await refresh()}catch(err){state.chat.pop();appendChat('answer',err.message)}finally{state.agentBusy=false;const next=$('#ask-form input');if(next){next.disabled=false;next.focus()}}}
+function chatMarkup(entry){const content=entry.kind==='answer'?'<div class="markdown-content">'+renderMarkdown(entry.message)+'</div>':'<div class="plain-message">'+escapeHtml(entry.message)+'</div>';const sources=entry.sources?.length?'<div class="chat-sources">'+entry.sources.map(x=>'<button data-edit="'+escapeHtml(x.id)+'">'+escapeHtml(x.title)+'</button>').join('')+'</div>':'';const changes=entry.changes?.length?'<div class="agent-changes">'+entry.changes.map(changeMarkup).join('')+'</div>':'';const actions=entry.proposal?'<div class="agent-actions"><button class="primary-button" data-apply-proposal="'+escapeHtml(entry.proposal)+'">Apply these changes</button><button class="quiet-button" data-dismiss-proposal="'+escapeHtml(entry.proposal)+'">Discard</button></div>':'';return '<div class="chat-bubble '+(entry.kind||'answer')+(entry.streaming?' is-streaming':'')+(entry.error?' is-error':'')+'">'+content+(entry.streaming?'<span class="stream-cursor" aria-label="Streaming"></span>':'')+sources+changes+actions+'</div>'}
+function appendChat(kind,message,sources=[],changes=[],proposal=null){state.chat.push({kind,message,sources,changes,proposal});renderChat()}
+async function ask(question){const prompt=question?.trim();if(!prompt||state.agentBusy)return;state.agentBusy=true;beginAgentRun();state.chat.push({kind:'user',message:prompt});const live={kind:'answer',message:'',sources:[],changes:[],proposal:null,streaming:true};state.chat.push(live);renderChat();const input=$('#ask-form input');if(input){input.value='';input.disabled=true}setAgentBusyUI();try{await streamAsk(prompt,live);if(live.changes?.length)await refresh()}catch(err){live.message=err.message;live.error=true;live.streaming=false;if(state.agentRun){state.agentRun.status='error';state.agentRun.phase='Run stopped';state.agentRun.completedAt=Date.now()}renderChat()}finally{state.agentBusy=false;endAgentRun();const next=$('#ask-form input');if(next){next.disabled=false;next.focus()}}}
 async function applyProposal(token){try{const result=await api('/api/assistant/commit',{method:'POST',body:JSON.stringify({token})});const entry=state.chat.find(x=>x.proposal===token);if(entry){entry.proposal=null;entry.message=result.answer;entry.changes=result.changes;entry.sources=result.sources}await refresh();toast(result.answer)}catch(err){appendChat('answer',err.message)}}
 $('#content').addEventListener('click',async e=>{const apply=e.target.closest('[data-apply-proposal]'),dismiss=e.target.closest('[data-dismiss-proposal]');if(!apply&&!dismiss)return;e.stopPropagation();if(apply){apply.disabled=true;await applyProposal(apply.dataset.applyProposal)}else{const entry=state.chat.find(x=>x.proposal===dismiss.dataset.dismissProposal);if(entry){entry.proposal=null;entry.message='Discarded. No changes were made.';render()}}});
 $('#content').addEventListener('click',async e=>{
