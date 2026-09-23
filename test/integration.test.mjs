@@ -37,7 +37,7 @@ test('local workspace CRUD, grounded assistant, and complete export', async () =
     const cleared=await request(`/api/items/${created.data.id}`,'PATCH',{due_at:null,status:'done'});
     assert.equal(cleared.status,200);assert.equal(cleared.data.due_at,null);assert.equal(cleared.data.status,'done');
     const exported=await request('/api/export');
-    assert.equal(exported.status,200);assert.equal(exported.data.schema_version,3);assert.equal(exported.data.items.length,1);assert.equal(exported.data.classes.length,1);
+    assert.equal(exported.status,200);assert.equal(exported.data.schema_version,4);assert.equal(exported.data.items.length,1);assert.equal(exported.data.classes.length,1);assert.ok(exported.data.agentic);
     const milestone=await request('/api/items','POST',{type:'task',title:'Outline solution',parent_id:created.data.id});
     assert.equal(milestone.status,201);assert.equal(milestone.data.parent_title,'Finish AI assignment');
     assert.equal((await request(`/api/items/${milestone.data.id}`,'DELETE')).status,200);
@@ -118,6 +118,22 @@ test('Second Brain memory and conversation history endpoints', async () => {
     const settings = await request('/api/settings', 'POST', { active_provider: 'openrouter', openrouter_model: 'anthropic/claude-3.5-sonnet' });
     assert.equal(settings.status, 200);
     assert.equal(settings.data.active_provider, 'openrouter');
+
+    // 5. Agentic profile and external-action approval API
+    const fact = await request('/api/profile', 'POST', { key: 'Graduation', value: 'May 2028' });
+    assert.equal(fact.status, 201);
+    const staged = await request('/api/external-actions', 'POST', { kind: 'email', recipient_address: 'prof@example.edu', subject: 'Research interest', body: 'Grounded draft', rationale: 'Matches cited lab work', evidence: [{ title: 'Lab', url: 'https://example.edu/lab' }] });
+    assert.equal(staged.status, 201);
+    assert.equal(staged.data.status, 'pending_approval');
+    assert.equal((await request(`/api/external-actions/${staged.data.id}/handoff`, 'POST', {})).status, 409);
+    assert.equal((await request(`/api/external-actions/${staged.data.id}/decision`, 'POST', { decision: 'approve' })).data.status, 'approved');
+    const handoff = await request(`/api/external-actions/${staged.data.id}/handoff`, 'POST', {});
+    assert.equal(handoff.status, 200);
+    assert.match(handoff.data.handoff_url, /^mailto:/);
+    assert.equal((await request(`/api/external-actions/${staged.data.id}/executed`, 'POST', {})).data.status, 'executed');
+    const agentic = await request('/api/agentic');
+    assert.equal(agentic.data.profile[0].fact_value, 'May 2028');
+    assert.equal(agentic.data.actions[0].status, 'executed');
   } finally {
     child.kill('SIGTERM');
     await rm(dir, { recursive: true, force: true });

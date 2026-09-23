@@ -20,7 +20,7 @@
 <body>
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">✦</div><div><strong>narain.ai</strong><small>PERSONAL OS</small></div></div>
+      <div class="brand"><div class="brand-mark"><span>✦</span></div><div><strong>narain.ai</strong><small>COGNITIVE OS</small></div></div>
       <div class="workspace-label">WORKSPACE</div>
       <nav id="nav" aria-label="Main navigation">
         <button class="nav-item active" data-view="today"><span>◫</span> Today</button>
@@ -31,14 +31,15 @@
         <button class="nav-item" data-view="journal"><span>✎</span> Journal</button>
         <button class="nav-item" data-view="goals"><span>◎</span> Goals</button>
         <button class="nav-item" data-view="assistant"><span>✧</span> Ask Orbit</button>
+        <button class="nav-item" data-view="actions"><span>↗</span> Action Center</button>
       </nav>
       <div class="workspace-label areas-label">LIFE AREAS <button id="add-area" title="Add area" aria-label="Add life area">+</button></div>
       <div id="areas-nav" class="areas-nav"></div>
-      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>Private workspace</strong><small>Stored on this Mac</small></div></div>
+      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>Local intelligence</strong><small>Workspace secured on this Mac</small></div></div>
     </aside>
 
     <main class="main">
-      <header class="topbar"><div class="crumb"><span>Workspace</span><span class="slash">/</span><strong id="crumb-current">Today</strong></div><div class="top-actions"><button id="voice-capture-btn" class="icon-button voice-capture-btn" title="Voice Quick-Capture (Speak to Orbit)" aria-label="Voice Quick-Capture"><span class="voice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg></span></button><button id="ai-settings-open" class="icon-button" title="AI Settings (Ollama / Groq / OpenRouter)" aria-label="AI Settings">⚙</button><label class="theme-control" title="Color theme"><span class="theme-symbol" aria-hidden="true">◐</span><select id="theme-select" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="search-open" class="icon-button search-open-btn" title="Search records (⌘K)" aria-label="Search"><span style="font-size:14px;">⌕</span><kbd style="margin-left:5px;font-size:10px;font-family:var(--font-mono);background:var(--accent-surface);color:var(--accent-primary);border-radius:4px;padding:2px 4px;font-weight:700;">⌘K</kbd></button><button id="new-main" class="primary-button">+ &nbsp; New entry</button></div></header>
+      <header class="topbar"><div class="crumb"><span class="workspace-pulse" aria-hidden="true"></span><span>Workspace</span><span class="slash">/</span><strong id="crumb-current">Today</strong><span class="agent-top-state" aria-live="polite"></span></div><div class="top-actions"><button id="voice-capture-btn" class="icon-button voice-capture-btn" title="Voice Quick-Capture (Speak to Orbit)" aria-label="Voice Quick-Capture"><span class="voice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg></span></button><button id="ai-settings-open" class="icon-button" title="AI Settings (Ollama / Groq / OpenRouter)" aria-label="AI Settings">⚙</button><label class="theme-control" title="Color theme"><span class="theme-symbol" aria-hidden="true">◐</span><select id="theme-select" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button id="search-open" class="icon-button search-open-btn" title="Search records (⌘K)" aria-label="Search"><span>⌕</span><kbd>⌘K</kbd></button><button id="new-main" class="primary-button"><span>＋</span> New entry</button></div></header>
       <div id="content" class="content"></div>
     </main>
   </div>
@@ -85,12 +86,211 @@
       <label>Local Ollama Model
         <input id="ai-ollama-model" placeholder="qwen3.5:4b">
       </label>
+      <label>Brave Search API Key <small style="opacity:0.7">(current web research)</small>
+        <input id="ai-brave-key" type="password" placeholder="BSA... (optional)" autocomplete="off">
+      </label>
       <p class="muted" style="font-size:12px;margin:0;">Orbit runs 100% free, private, and unlimited on local Ollama, or accelerated with OpenRouter/Groq. Voice and conversational commands execute in &lt;5ms via Fast-Path.</p>
     </div>
     <div class="dialog-actions">
       <button type="button" class="quiet-button" data-close="ai-settings-dialog">Close</button>
       <button type="button" id="ai-save-settings" class="primary-button">Save Settings</button>
     </div>
+  </dialog>
+
+  <dialog id="templates-dialog" class="dialog templates-dialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow">REUSABLE ROUTINES</div>
+        <h2>Daily Plan Templates</h2>
+      </div>
+      <button type="button" class="close" data-close="templates-dialog" aria-label="Close">×</button>
+    </div>
+    <p class="muted templates-help">Apply a saved routine to the selected day or build a new routine template to reuse anytime.</p>
+    <div class="templates-toolbar">
+      <button type="button" id="open-create-template-btn" class="secondary-button">+ &nbsp; Create new template</button>
+    </div>
+    <div id="templates-list" class="templates-list"></div>
+    <div id="template-create-card" class="template-create-card hidden">
+      <h3>New Routine Template</h3>
+      <form id="template-create-form">
+        <label>Template Name<input id="tpl-create-name" required maxlength="100" placeholder="e.g. LeetCode &amp; Gym Grind"></label>
+        <label>Description<input id="tpl-create-desc" maxlength="250" placeholder="e.g. Heavy morning coding, gym, and evening class"></label>
+        <div class="tpl-blocks-header">
+          <strong>Routine Time Blocks</strong>
+          <button type="button" id="tpl-add-block-row" class="tiny-link">+ Add block</button>
+        </div>
+        <div id="tpl-blocks-builder" class="tpl-blocks-builder"></div>
+        <div class="dialog-actions">
+          <button type="button" id="tpl-create-cancel" class="quiet-button">Cancel</button>
+          <button type="submit" class="primary-button">Save Template</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="save-template-dialog" class="dialog small-dialog">
+    <form id="save-template-form" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <div class="eyebrow">SAVE ROUTINE</div>
+          <h2>Save Day as Template</h2>
+        </div>
+        <button type="button" class="close" data-close="save-template-dialog" aria-label="Close">×</button>
+      </div>
+      <p class="muted">Turn today’s custom time blocks into a reusable template you can apply to any day with one click.</p>
+      <div id="save-template-preview" class="save-template-preview"></div>
+      <label>Template Name
+        <input id="save-tpl-name" required maxlength="100" placeholder="e.g. Gym &amp; LeetCode Sprint">
+      </label>
+      <label>Description (optional)
+        <textarea id="save-tpl-desc" rows="2" maxlength="300" placeholder="e.g. My productive weekday workout and deep study routine..."></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="quiet-button" data-close="save-template-dialog">Cancel</button>
+        <button type="submit" class="primary-button">Save Template</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="health-setup-dialog" class="dialog health-setup-dialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow">APPLE HEALTHKIT INTEGRATION</div>
+        <h2>Connect Apple Health (100% Free)</h2>
+      </div>
+      <button type="button" class="close" data-close="health-setup-dialog" aria-label="Close">×</button>
+    </div>
+    <div class="health-setup-body">
+      <div class="health-setup-banner">
+        <div class="banner-badge">✦ ZERO SHORTCUTS · 100% REAL APPLE HEALTH DATA · DIRECT LOCAL SYNC</div>
+        <p>Import your <strong>Steps</strong>, <strong>Heart Rate</strong>, <strong>Active Calories</strong>, <strong>Sleep Analysis</strong>, <strong>Workouts</strong>, and <strong>HRV</strong> directly from your iPhone &amp; Apple Watch.</p>
+      </div>
+
+      <!-- Option 1: 1-Click Apple Health Export Dropzone -->
+      <div class="health-dropzone-card">
+        <div class="dropzone-head">
+          <span class="badge-pill">METHOD 1 · RECOMMENDED</span>
+          <h3>1-Click Apple Health Export Ingestion</h3>
+          <p class="muted">Imports your entire real history (steps, sleep, workouts, heart rate) in 3 seconds. Zero third-party apps needed.</p>
+        </div>
+
+        <div class="setup-mini-steps">
+          <div class="mini-step">
+            <span class="step-num">1</span>
+            <span>On iPhone, open <strong>Health App</strong> → tap your <strong>Profile photo</strong> (top right)</span>
+          </div>
+          <div class="mini-step">
+            <span class="step-num">2</span>
+            <span>Scroll down and tap <strong>“Export All Health Data”</strong></span>
+          </div>
+          <div class="mini-step">
+            <span class="step-num">3</span>
+            <span><strong>AirDrop <code>export.zip</code></strong> to this Mac and drop it right below!</span>
+          </div>
+        </div>
+
+        <div id="modal-health-dropzone" class="health-dropzone">
+          <div class="dropzone-icon">📥</div>
+          <h4>Drag &amp; Drop <code>export.zip</code> or <code>export.xml</code> here</h4>
+          <p class="muted">or click to browse files from your Mac</p>
+          <input type="file" id="modal-health-file-input" accept=".zip,.xml" hidden>
+          <div id="modal-upload-status" class="upload-status hidden"></div>
+        </div>
+      </div>
+
+      <!-- Option 2: Automated Background App Sync -->
+      <div class="health-config-card">
+        <div class="dropzone-head">
+          <span class="badge-pill alt">METHOD 2 · CONTINUOUS</span>
+          <h3>Automated Background Sync (“Does It Self”)</h3>
+          <p class="muted">Prefer silent automatic updates? Install a free App Store utility like <em>Health Auto Export</em> or <em>Hooksy</em>. Paste this single URL into the app's Webhook field once:</p>
+        </div>
+        <div class="config-field">
+          <label>Pre-Authenticated Webhook URL (1-Click Paste)
+            <div class="copy-input-row">
+              <input id="health-setup-combined-url" readonly value="Loading...">
+              <button type="button" class="copy-btn" data-copy-target="health-setup-combined-url">Copy</button>
+            </div>
+          </label>
+          <small class="muted">The app automatically fetches your HealthKit biometrics in the background and sends them here. No shortcuts required.</small>
+        </div>
+        <div class="config-field">
+          <label>LAN IP Webhook URL (Alternative)
+            <div class="copy-input-row">
+              <input id="health-setup-ip-url" readonly value="Loading...">
+              <button type="button" class="copy-btn" data-copy-target="health-setup-ip-url">Copy</button>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Clear Data / Reset -->
+      <div class="health-reset-card">
+        <div class="test-head">
+          <div>
+            <strong>Clear Stored Health Data</strong>
+            <p class="muted">Wipes previous records to keep your dashboard clean and 100% genuine.</p>
+          </div>
+          <button type="button" id="health-clear-data-btn" class="danger-button-outline">Clear All Health Data</button>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="primary-button" data-close="health-setup-dialog">Done</button>
+    </div>
+  </dialog>
+
+  <dialog id="health-quick-log-dialog" class="dialog small-dialog">
+    <form id="health-quick-log-form" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <div class="eyebrow">QUICK LOG BIOMETRICS</div>
+          <h2>Log Health Metric</h2>
+        </div>
+        <button type="button" class="close" data-close="health-quick-log-dialog" aria-label="Close">×</button>
+      </div>
+      <div class="quick-log-type-row" id="quick-log-type-row">
+        <button type="button" class="selected" data-health-type="water">💧 Water</button>
+        <button type="button" data-health-type="workout">🏋️ Workout</button>
+        <button type="button" data-health-type="weight">⚖️ Weight</button>
+      </div>
+      
+      <div id="quick-log-water-panel">
+        <label>Water Amount
+          <div class="water-quick-options">
+            <button type="button" class="secondary-button water-preset" data-water-amount="250">+250 ml (Cup)</button>
+            <button type="button" class="secondary-button water-preset" data-water-amount="500">+500 ml (Bottle)</button>
+            <button type="button" class="secondary-button water-preset" data-water-amount="750">+750 ml (Flask)</button>
+          </div>
+          <input id="quick-log-water-input" type="number" step="50" min="50" max="3000" value="250" placeholder="Custom ml">
+        </label>
+      </div>
+
+      <div id="quick-log-workout-panel" class="hidden">
+        <label>Workout Name
+          <input id="quick-log-workout-name" placeholder="e.g. Traditional Strength Training, Run, Swim">
+        </label>
+        <div class="field-grid">
+          <label>Duration (minutes)
+            <input id="quick-log-workout-duration" type="number" min="1" max="480" value="45">
+          </label>
+          <label>Calories Burned (kcal)
+            <input id="quick-log-workout-calories" type="number" min="0" max="3000" value="280">
+          </label>
+        </div>
+      </div>
+
+      <div id="quick-log-weight-panel" class="hidden">
+        <label>Weight (kg)
+          <input id="quick-log-weight-input" type="number" step="0.1" min="30" max="250" placeholder="e.g. 74.5">
+        </label>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="quiet-button" data-close="health-quick-log-dialog">Cancel</button>
+        <button type="submit" class="primary-button">Save Log</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog id="search-dialog" class="dialog search-dialog"><div class="search-box"><span>⌕</span><input id="search-input" placeholder="Search tasks, notes, goals, classes…" aria-label="Search records"><button type="button" class="close" data-close="search-dialog">×</button></div><div id="search-results"></div></dialog>
