@@ -35,7 +35,7 @@ function getChatSessionId() {
     return 'default-session';
   }
 }
-const state = { areas:[], classes:[], items:[], plan_templates:[], health:null, healthMetrics:null, healthDate:null, healthRange:'7', view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false,agentRun:null,aiSettings:null,agentic:{profile:[],missions:[],actions:[]},sessionId:getChatSessionId() };
+const state = { areas:[], classes:[], items:[], plan_templates:[], health:null, healthMetrics:null, healthDate:null, healthRange:'7', view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false,agentRun:null,aiSettings:null,agentic:{profile:[],missions:[],actions:[]},sessionId:getChatSessionId(), taskSortField:'due_at', taskSortDir:'asc', taskSearchQuery:'', taskTypeFilter:'all' };
 const labels = {today:'Today',plan:'Daily plan',tasks:'Tasks',calendar:'Calendar',notes:'Notes',journal:'Journal',goals:'Goals',assistant:'Ask Orbit',actions:'Action Center'};
 const singular = {tasks:'task',plan:'event',notes:'note',journal:'journal',goals:'goal',calendar:'event'};
 const dateKey = dayKey;
@@ -84,66 +84,301 @@ function areaTag(item){const a=area(item.area_id);return a?`<span class="badge">
 function itemDate(item){return item.due_at||item.starts_at||item.created_at}
 function isOverdue(item){return item.type==='task'&&item.status==='open'&&item.due_at&&new Date(item.due_at)<new Date()}
 function filtered(type){return state.items.filter(x=>x.type===type&&x.status!=='archived'&&(!state.area||x.area_id===state.area))}
-function taskSort(a,b){const due=(a.due_at||'9999').localeCompare(b.due_at||'9999');if(due)return due;const parentTitle=item=>state.items.find(x=>x.id===(item.parent_id||item.id))?.title||item.title;const group=parentTitle(a).localeCompare(parentTitle(b),undefined,{numeric:true});if(group)return group;if(a.parent_id!==b.parent_id)return a.parent_id?1:-1;return a.title.localeCompare(b.title,undefined,{numeric:true})}
+function getNotionTagColor(name = '') {
+  const lower = String(name).toLowerCase();
+  if (lower.includes('3600')) return 'notion-tag-pink';
+  if (lower.includes('2340')) return 'notion-tag-sand';
+  if (lower.includes('academic') || lower.includes('cs') || lower.includes('math') || lower.includes('study')) return 'notion-tag-pink';
+  if (lower.includes('career') || lower.includes('work') || lower.includes('job') || lower.includes('interview')) return 'notion-tag-sand';
+  if (lower.includes('health') || lower.includes('gym') || lower.includes('fitness') || lower.includes('wellness')) return 'notion-tag-green';
+  if (lower.includes('personal') || lower.includes('life')) return 'notion-tag-blue';
 
-function taskSummary(collection) {
-  const noun = collection.length === 1 ? 'task' : 'tasks';
-  const done = collection.filter(item => item.status === 'done').length;
-  return collection.length + ' ' + noun + (state.filter === 'all' && done ? ' · ' + done + ' done' : '');
+  const palette = ['notion-tag-pink', 'notion-tag-sand', 'notion-tag-purple', 'notion-tag-blue', 'notion-tag-green', 'notion-tag-yellow', 'notion-tag-orange', 'notion-tag-gray'];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) & 0xffffffff;
+  return palette[Math.abs(hash) % palette.length];
 }
-function taskSubgroups(group) {
-  if (group.area?.name !== 'Academics') {
-    return '<div class="task-group-rows">' + group.tasks.map(taskRow).join('') + '</div>';
+
+function formatNotionDate(isoDateStr, status = 'open') {
+  if (!isoDateStr) return '<span class="muted notion-no-date">—</span>';
+  const d = new Date(isoDateStr);
+  if (isNaN(d.getTime())) return '<span class="muted notion-no-date">—</span>';
+  const formatted = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const isPast = status === 'open' && d < new Date();
+  if (isPast) {
+    return `<span class="notion-date overdue" title="Overdue">${escapeHtml(formatted)}</span>`;
   }
-  const subgroups = new Map();
-  for (const item of group.tasks) {
-    const label = item.class_name?.trim() || 'Unassigned class';
-    const key = item.class_id || 'class:' + label;
-    if (!subgroups.has(key)) subgroups.set(key, { label, tasks:[] });
-    subgroups.get(key).tasks.push(item);
-  }
-  return [...subgroups.values()]
-    .sort((a,b) => {
-      if (a.label === 'Unassigned class') return 1;
-      if (b.label === 'Unassigned class') return -1;
-      return a.label.localeCompare(b.label);
-    })
-    .map(subgroup => '<section class="task-subgroup"><div class="task-subgroup-head"><span class="task-subgroup-title"><span class="subgroup-marker" aria-hidden="true">↳</span><strong>' + escapeHtml(subgroup.label) + '</strong></span><span class="task-subgroup-summary">' + taskSummary(subgroup.tasks) + '</span></div>' + subgroup.tasks.map(taskRow).join('') + '</section>')
-    .join('');
+  return `<span class="notion-date">${escapeHtml(formatted)}</span>`;
 }
+
+function notionTaskRow(item) {
+  const isDone = item.status === 'done';
+  const tags = [];
+  if (item.class_name) tags.push(item.class_name);
+  if (item.area_name && item.area_name !== 'Academics' && (!item.class_name || item.area_name !== item.class_name)) {
+    tags.push(item.area_name);
+  }
+  if (!tags.length && item.area_name) tags.push(item.area_name);
+  const tagHtml = tags.length ? tags.map(t => `<span class="notion-tag ${getNotionTagColor(t)}">${escapeHtml(t)}</span>`).join(' ') : '<span class="muted notion-no-date">—</span>';
+  const priority = item.priority || 'medium';
+
+  return `
+    <tr class="notion-row ${isDone ? 'is-done' : ''}" data-task-id="${item.id}">
+      <!-- 1. Task Name Column -->
+      <td class="notion-cell col-title">
+        <div class="cell-title-wrap">
+          <button type="button" class="notion-check ${isDone ? 'checked' : ''}" data-toggle="${item.id}" aria-label="${isDone ? 'Mark incomplete' : 'Complete task'}">
+            ${isDone ? '✓' : ''}
+          </button>
+          <span class="notion-doc-icon" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+              <path fill-rule="evenodd" d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6.207a1.5 1.5 0 0 0-.44-1.06L9.854 1.94A1.5 1.5 0 0 0 8.793 1.5H4zm0 1h4.793a.5.5 0 0 1 .353.146l3.208 3.208a.5.5 0 0 1 .146.353V13a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z"/>
+            </svg>
+          </span>
+          <span class="notion-title-text" data-edit="${item.id}" title="Click to edit: ${escapeHtml(item.title)}">
+            ${escapeHtml(item.title)}
+          </span>
+        </div>
+      </td>
+
+      <!-- 2. Due Date Column -->
+      <td class="notion-cell col-due">
+        ${formatNotionDate(item.due_at, item.status)}
+      </td>
+
+      <!-- 3. Type Column -->
+      <td class="notion-cell col-type">
+        ${tagHtml}
+      </td>
+
+      <!-- 4. Priority Column -->
+      <td class="notion-cell col-priority">
+        <span class="notion-priority-pill priority-${priority}">
+          ${priority.charAt(0).toUpperCase() + priority.slice(1)}
+        </span>
+      </td>
+
+      <!-- 5. Status Column -->
+      <td class="notion-cell col-status">
+        <button type="button" class="notion-status-pill ${isDone ? 'status-done' : 'status-not-started'}" data-toggle="${item.id}" title="Click to toggle status">
+          <span class="status-dot"></span>
+          <span>${isDone ? 'Done' : 'Not started'}</span>
+        </button>
+      </td>
+
+      <!-- 6. Actions Column -->
+      <td class="notion-cell col-actions">
+        <div class="notion-row-actions">
+          <button type="button" data-edit="${item.id}" title="Edit task">✎</button>
+          <button type="button" data-delete="${item.id}" title="Delete task">×</button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function taskSort(a, b) {
+  const due = (a.due_at || '9999').localeCompare(b.due_at || '9999');
+  if (due) return due;
+  const parentTitle = item => state.items.find(x => x.id === (item.parent_id || item.id))?.title || item.title;
+  const group = parentTitle(a).localeCompare(parentTitle(b), undefined, { numeric: true });
+  if (group) return group;
+  if (a.parent_id !== b.parent_id) return a.parent_id ? 1 : -1;
+  return a.title.localeCompare(b.title, undefined, { numeric: true });
+}
+
 function taskView() {
-  const items = filtered('task')
-    .filter(item => state.filter === 'all' || item.status === state.filter)
-    .sort(taskSort);
-  const groups = new Map();
-  for (const item of items) {
-    const selectedArea = area(item.area_id);
-    const key = selectedArea?.id || 'unassigned-area';
-    if (!groups.has(key)) groups.set(key, { key, area:selectedArea, tasks:[] });
-    groups.get(key).tasks.push(item);
+  const allTasks = filtered('task');
+
+  // Filter by status (all, open, done)
+  let items = allTasks.filter(item => state.filter === 'all' || item.status === state.filter);
+
+  // Filter by type/class dropdown
+  if (state.taskTypeFilter && state.taskTypeFilter !== 'all') {
+    items = items.filter(item => {
+      if (state.taskTypeFilter.startsWith('class:')) {
+        return item.class_id === state.taskTypeFilter.replace('class:', '');
+      }
+      if (state.taskTypeFilter.startsWith('area:')) {
+        return item.area_id === state.taskTypeFilter.replace('area:', '');
+      }
+      return item.class_name === state.taskTypeFilter || item.area_name === state.taskTypeFilter;
+    });
   }
-  const areaOrder = new Map(state.areas.map((entry,index) => [entry.id,index]));
-  const orderedGroups = [...groups.values()].sort((a,b) => {
-    const aOrder = a.area ? (areaOrder.get(a.area.id) ?? 999) : 999;
-    const bOrder = b.area ? (areaOrder.get(b.area.id) ?? 999) : 999;
-    return aOrder - bOrder || (a.area?.name || 'Unassigned').localeCompare(b.area?.name || 'Unassigned');
+
+  // Filter by search query
+  if (state.taskSearchQuery && state.taskSearchQuery.trim()) {
+    const q = state.taskSearchQuery.trim().toLowerCase();
+    items = items.filter(item => {
+      const title = (item.title || '').toLowerCase();
+      const body = (item.body || '').toLowerCase();
+      const className = (item.class_name || '').toLowerCase();
+      const areaName = (item.area_name || '').toLowerCase();
+      return title.includes(q) || body.includes(q) || className.includes(q) || areaName.includes(q);
+    });
+  }
+
+  // Sort items
+  const sortField = state.taskSortField || 'due_at';
+  const sortDir = state.taskSortDir || 'asc';
+  items.sort((a, b) => {
+    let cmp = 0;
+    if (sortField === 'title') {
+      cmp = (a.title || '').localeCompare(b.title || '', undefined, { numeric: true });
+    } else if (sortField === 'due_at') {
+      const aDue = a.due_at || (sortDir === 'asc' ? '9999' : '0000');
+      const bDue = b.due_at || (sortDir === 'asc' ? '9999' : '0000');
+      cmp = aDue.localeCompare(bDue);
+    } else if (sortField === 'type') {
+      const aType = a.class_name || a.area_name || '';
+      const bType = b.class_name || b.area_name || '';
+      cmp = aType.localeCompare(bType);
+    } else if (sortField === 'priority') {
+      const weight = { high: 3, medium: 2, low: 1 };
+      cmp = (weight[a.priority] || 2) - (weight[b.priority] || 2);
+    } else if (sortField === 'status') {
+      const aStatus = a.status === 'open' ? 0 : 1;
+      const bStatus = b.status === 'open' ? 0 : 1;
+      cmp = aStatus - bStatus;
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
   });
-  const groupsMarkup = orderedGroups.map(group => {
-    const collapsed = state.collapsedTaskGroups.has(group.key);
-    const label = group.area?.name || 'Unassigned area';
-    const color = group.area?.color || '#9aa3b2';
-    const description = group.area?.name === 'Academics' ? 'Organized by class' : 'Life area';
-    return '<section class="task-group' + (collapsed ? ' is-collapsed' : '') + '" data-task-group="' + escapeHtml(group.key) + '">' +
-      '<button type="button" class="task-group-header" data-group-toggle="' + escapeHtml(group.key) + '" aria-expanded="' + (!collapsed) + '">' +
-      '<span class="task-group-heading"><span class="group-color-dot" style="background:' + color + '"></span><span><strong>' + escapeHtml(label) + '</strong><small>' + description + '</small></span></span>' +
-      '<span class="task-group-summary">' + taskSummary(group.tasks) + '<span class="group-chevron" aria-hidden="true">⌄</span></span></button>' +
-      '<div class="task-group-body">' + taskSubgroups(group) + '</div></section>';
-  }).join('');
-  return '<div class="hero"><div><div class="eyebrow">' + (state.area ? escapeHtml(area(state.area)?.name || 'LIFE AREA') : 'YOUR WORKSPACE') + '</div><h1 class="page-title">Tasks<span style="color:var(--accent-primary)">.</span></h1><p class="muted section-desc">Keep deadlines, classes, and next actions in one place—organized by life area.</p></div></div>' +
-    '<div class="list-toolbar task-list-toolbar"><div class="filters"><button class="filter ' + (state.filter === 'open' ? 'active' : '') + '" data-filter="open">Open</button><button class="filter ' + (state.filter === 'done' ? 'active' : '') + '" data-filter="done">Done</button><button class="filter ' + (state.filter === 'all' ? 'active' : '') + '" data-filter="all">All</button></div>' +
-    '<div class="task-toolbar-right"><span class="task-count muted">' + items.length + ' ' + (items.length === 1 ? 'task' : 'tasks') + '</span><button class="tiny-link" data-new="task">+ Add task</button></div></div>' +
-    '<div class="task-grouping-note"><span class="grouping-icon" aria-hidden="true">↳</span><span>Grouped by <strong>life area</strong>' + (state.area ? '' : ' · Academics is organized by class') + '</span></div>' +
-    '<div class="task-groups">' + (items.length ? groupsMarkup : empty('Nothing here yet. Add a task to get started.')) + '</div>';
+
+  // Extract all distinct types & classes for the filter dropdown
+  const typeOptions = [];
+  const seenTypes = new Set();
+  for (const c of state.classes) {
+    if (!seenTypes.has(c.id)) {
+      seenTypes.add(c.id);
+      typeOptions.push({ value: `class:${c.id}`, label: `Class · ${c.name}` });
+    }
+  }
+  for (const a of state.areas) {
+    if (a.name !== 'Academics' && !seenTypes.has(a.id)) {
+      seenTypes.add(a.id);
+      typeOptions.push({ value: `area:${a.id}`, label: `Area · ${a.name}` });
+    }
+  }
+
+  const sortIndicator = (field) => {
+    if (state.taskSortField !== field) return '<span class="sort-icon-inactive">↕</span>';
+    return state.taskSortDir === 'asc' ? '<span class="sort-icon-active">▲</span>' : '<span class="sort-icon-active">▼</span>';
+  };
+
+  const openCount = allTasks.filter(t => t.status === 'open').length;
+  const doneCount = allTasks.filter(t => t.status === 'done').length;
+
+  return `
+    <div class="hero tasks-hero">
+      <div>
+        <div class="eyebrow">${state.area ? escapeHtml(area(state.area)?.name || 'LIFE AREA') : 'YOUR WORKSPACE'}</div>
+        <h1 class="page-title">Tasks<span style="color:var(--accent-primary)">.</span></h1>
+        <p class="muted section-desc">A unified Notion-style database of deadlines, classes, and actions.</p>
+      </div>
+      <div class="hero-actions">
+        <button class="primary-button" data-new="task">+ New task</button>
+      </div>
+    </div>
+
+    <!-- Notion Table Toolbar -->
+    <div class="notion-toolbar">
+      <div class="notion-toolbar-left">
+        <div class="notion-view-pills">
+          <button type="button" class="notion-view-pill ${state.filter === 'all' ? 'active' : ''}" data-filter="all">All (${allTasks.length})</button>
+          <button type="button" class="notion-view-pill ${state.filter === 'open' ? 'active' : ''}" data-filter="open">Not started (${openCount})</button>
+          <button type="button" class="notion-view-pill ${state.filter === 'done' ? 'active' : ''}" data-filter="done">Done (${doneCount})</button>
+        </div>
+
+        <div class="notion-filter-wrap">
+          <select id="task-type-filter" class="notion-type-select">
+            <option value="all">All Types &amp; Classes</option>
+            ${typeOptions.map(opt => `<option value="${opt.value}" ${state.taskTypeFilter === opt.value ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="notion-toolbar-right">
+        <div class="notion-search-box">
+          <span class="search-magnifier" aria-hidden="true">🔍</span>
+          <input type="text" id="task-table-search" placeholder="Search tasks..." value="${escapeHtml(state.taskSearchQuery || '')}">
+          ${state.taskSearchQuery ? `<button type="button" class="search-clear-btn" id="clear-task-search">×</button>` : ''}
+        </div>
+        <span class="notion-counter-badge muted">${items.length} ${items.length === 1 ? 'task' : 'tasks'}</span>
+      </div>
+    </div>
+
+    <!-- Notion Database Table Card -->
+    <div class="card notion-table-card">
+      <div class="notion-table-scroll-container">
+        <table class="notion-table">
+          <thead>
+            <tr>
+              <th class="notion-th col-title" data-task-sort="title">
+                <div class="th-inner">
+                  <span class="th-icon-aa" aria-hidden="true">Aa</span>
+                  <span class="th-label">Task name</span>
+                  ${sortIndicator('title')}
+                </div>
+              </th>
+              <th class="notion-th col-due" data-task-sort="due_at">
+                <div class="th-inner">
+                  <span class="th-icon" aria-hidden="true">📅</span>
+                  <span class="th-label">Due</span>
+                  ${sortIndicator('due_at')}
+                </div>
+              </th>
+              <th class="notion-th col-type" data-task-sort="type">
+                <div class="th-inner">
+                  <span class="th-icon" aria-hidden="true">⊙</span>
+                  <span class="th-label">Type</span>
+                  ${sortIndicator('type')}
+                </div>
+              </th>
+              <th class="notion-th col-priority" data-task-sort="priority">
+                <div class="th-inner">
+                  <span class="th-icon" aria-hidden="true">⚡</span>
+                  <span class="th-label">Priority</span>
+                  ${sortIndicator('priority')}
+                </div>
+              </th>
+              <th class="notion-th col-status" data-task-sort="status">
+                <div class="th-inner">
+                  <span class="th-icon" aria-hidden="true">✺</span>
+                  <span class="th-label">Status</span>
+                  ${sortIndicator('status')}
+                </div>
+              </th>
+              <th class="notion-th col-actions">
+                <span class="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="notion-tasks-tbody">
+            ${items.length ? items.map(notionTaskRow).join('') : `
+              <tr>
+                <td colspan="6" class="notion-empty-cell">
+                  <div class="notion-empty-state">
+                    <span class="notion-empty-icon">✧</span>
+                    <p>No matching tasks found.</p>
+                    <button type="button" class="secondary-button" data-new="task">+ Create a task</button>
+                  </div>
+                </td>
+              </tr>
+            `}
+            <!-- Inline "+ New" bottom row matching Notion -->
+            <tr class="notion-inline-new-row" data-new="task">
+              <td colspan="6">
+                <div class="notion-new-btn-inner">
+                  <span class="notion-plus-symbol">+</span>
+                  <span>New</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 function empty(message){return `<div class="empty"><span class="empty-icon">✧</span>${message}</div>`}
 function taskRow(item){return `<div class="item-row ${item.status==='done'?'done':''}"><button class="check ${item.status==='done'?'checked':''}" data-toggle="${item.id}" aria-label="${item.status==='done'?'Mark incomplete':'Complete task'}">${item.status==='done'?'✓':''}</button><div class="item-main"><div class="item-title" data-edit="${item.id}">${escapeHtml(item.title)}</div><div class="item-meta">${areaTag(item)}${item.class_name?`<span class="badge course">${escapeHtml(item.class_name)}</span>`:''}${item.parent_title?`<span class="badge">↳ ${escapeHtml(item.parent_title)}</span>`:''}${item.due_at?`<span class="badge ${isOverdue(item)?'warn':''}">${isOverdue(item)?'Overdue · ':''}${fmtDate(item.due_at)}</span>`:''}<span>${escapeHtml(item.priority)} priority</span></div></div><div class="row-actions"><button data-edit="${item.id}" title="Edit">✎</button><button data-delete="${item.id}" title="Delete">×</button></div></div>`}
@@ -1833,13 +2068,13 @@ $('#content').addEventListener('pointerdown',e=>{const chip=e.target.closest('.c
 document.addEventListener('pointermove',e=>{if(!calendarDrag)return;if(!calendarDrag.active&&Math.hypot(e.clientX-calendarDrag.x,e.clientY-calendarDrag.y)>7){calendarDrag.active=true;calendarDrag.chip.classList.add('dragging')}if(!calendarDrag.active)return;e.preventDefault();document.querySelectorAll('.calendar-cell.drop-target').forEach(x=>x.classList.remove('drop-target'));document.elementFromPoint(e.clientX,e.clientY)?.closest('.calendar-cell')?.classList.add('drop-target')});
 document.addEventListener('pointerup',async e=>{if(!calendarDrag)return;const drag=calendarDrag;calendarDrag=null;drag.chip.classList.remove('dragging');document.querySelectorAll('.calendar-cell.drop-target').forEach(x=>x.classList.remove('drop-target'));if(!drag.active)return;suppressCalendarClick=true;setTimeout(()=>{suppressCalendarClick=false},100);const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest('.calendar-cell');if(cell)await moveEventToDay(drag.id,cell.dataset.calDay)});
 document.addEventListener('pointercancel',()=>{calendarDrag=null;document.querySelectorAll('.calendar-cell.drop-target,.calendar-chip.dragging').forEach(x=>x.classList.remove('drop-target','dragging'))});
-document.addEventListener('click',async e=>{const t=e.target.closest('button,[data-edit],.event-card,.note-card,.mini-item');if(!t)return;if(t.dataset.healthDateNav){const delta=Number(t.dataset.healthDateNav);const curr=state.healthDate||dayKey(new Date());state.healthDate=addDays(curr,delta);await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.hasAttribute('data-health-today')){state.healthDate=dayKey(new Date());await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.dataset.healthJumpDate){state.healthDate=t.dataset.healthJumpDate;await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.dataset.healthRange){state.healthRange=t.dataset.healthRange;await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.id==='hub-clear-health-btn'||t.id==='health-clear-data-btn'){await clearAllHealthData();return}if(t.id==='browse-hub-export-btn'){$('#hub-health-file-input')?.click();return}if(t.closest('#modal-health-dropzone')&&!t.closest('input')){$('#modal-health-file-input')?.click();return}if(t.dataset.quickWater){const delta=Number(t.dataset.quickWater);try{await api('/api/health/quick-log',{method:'POST',body:JSON.stringify({action:'add_water',amount_ml:delta})});await refresh();toast(delta>0?`+${delta}ml water logged 💧`:`${delta}ml water updated`)}catch(err){toast(err.message)}return}if(t.hasAttribute('data-open-health-setup')||t.id==='open-health-setup-btn'){await openHealthSetupModal();return}if(t.hasAttribute('data-open-health-quick-log')||t.id==='open-health-log-btn'){$('#health-quick-log-form')?.reset();$('#health-quick-log-dialog')?.showModal();return}if(t.closest('[data-health-jump]')){const healthArea=state.areas.find(a=>a.name.toLowerCase()==='health');if(healthArea)navigate('tasks',healthArea.id);return}if(t.dataset.copyTarget){const inp=document.getElementById(t.dataset.copyTarget);if(inp){await navigator.clipboard?.writeText(inp.value);const orig=t.textContent;t.textContent='Copied!';setTimeout(()=>{t.textContent=orig},1500);toast('Copied to clipboard')}return}if(t.id==='health-test-sync-btn'){try{t.disabled=true;t.textContent='Syncing…';const setupInfo=await api('/api/health/setup');await api('/api/health/sync',{method:'POST',headers:{'X-Health-Token':setupInfo.sync_token},body:JSON.stringify(setupInfo.sample_payload)});await refresh();$('#health-setup-dialog')?.close();toast('⚡ Verified Apple HealthKit test sync received!')}catch(err){toast(err.message)}finally{t.disabled=false;t.textContent='⚡ Send Test HealthKit Sync'}return}if(t.id==='health-refresh-btn'){await refresh();toast('Biometrics refreshed');return}if(t.dataset.waterAmount){const inp=$('#quick-log-water-input');if(inp)inp.value=t.dataset.waterAmount;return}if(t.dataset.healthType){document.querySelectorAll('#quick-log-type-row button').forEach(b=>b.classList.remove('selected'));t.classList.add('selected');const ty=t.dataset.healthType;$('#quick-log-water-panel')?.classList.toggle('hidden',ty!=='water');$('#quick-log-workout-panel')?.classList.toggle('hidden',ty!=='workout');$('#quick-log-weight-panel')?.classList.toggle('hidden',ty!=='weight');return}if(t.hasAttribute('data-action-start')){navigate('assistant');setTimeout(()=>{const input=$('#ask-form input');if(input){input.value='Research this target and draft a truthful personalized outreach message for my approval: ';input.focus()}},0);return}if(t.dataset.profileDelete){try{await api('/api/profile/'+t.dataset.profileDelete,{method:'DELETE'});await refresh();toast('Profile fact removed')}catch(err){toast(err.message)}return}if(t.dataset.actionDecision){try{await api('/api/external-actions/'+t.dataset.actionId+'/decision',{method:'POST',body:JSON.stringify({decision:t.dataset.actionDecision})});await refresh();toast(t.dataset.actionDecision==='approve'?'Draft approved':'Draft rejected')}catch(err){toast(err.message)}return}if(t.dataset.actionHandoff){try{const result=await api('/api/external-actions/'+t.dataset.actionHandoff+'/handoff',{method:'POST',body:'{}'});await navigator.clipboard?.writeText(result.action.body);await refresh();if(result.handoff_url)location.href=result.handoff_url;toast('Draft copied; handoff opened')}catch(err){toast(err.message)}return}if(t.dataset.actionComplete){try{await api('/api/external-actions/'+t.dataset.actionComplete+'/executed',{method:'POST',body:'{}'});await refresh();toast('Marked complete from your confirmation')}catch(err){toast(err.message)}return}if(t.dataset.groupToggle){const key=t.dataset.groupToggle;if(state.collapsedTaskGroups.has(key))state.collapsedTaskGroups.delete(key);else state.collapsedTaskGroups.add(key);render();return}if(t.dataset.planNav){state.planDay=addDays(state.planDay,Number(t.dataset.planNav));render();return}if(t.hasAttribute('data-plan-today')){state.planDay=dayKey(new Date());render();return}if(t.dataset.planAdd){openEditor('event',null,state.planDay,Number(t.dataset.planAdd));return}if(t.hasAttribute('data-open-templates')){openTemplatesModal();return}if(t.hasAttribute('data-open-save-template')){openSaveTemplateModal();return}if(t.dataset.planToggle){await toggleBlockDone(t.dataset.planToggle);return}if(t.dataset.planDuplicate){await duplicateBlock(t.dataset.planDuplicate);return}if(t.dataset.applyTemplate){await applyTemplate(t.dataset.applyTemplate,t.dataset.applyMode||'append');return}if(t.dataset.deleteTemplate){if(confirm('Delete this routine template?')){try{await api('/api/plan-templates/'+t.dataset.deleteTemplate,{method:'DELETE'});await refresh();toast('Template deleted')}catch(err){toast(err.message)}}return}if(t.dataset.quickApplyTplId){await applyTemplate(t.dataset.quickApplyTplId,'append');return}if(t.dataset.fillGapStart){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end'),tInput=$('#plan-q-title');if(sInput)sInput.value=t.dataset.fillGapStart;if(eInput)eInput.value=t.dataset.fillGapEnd;if(tInput){tInput.focus();tInput.scrollIntoView({behavior:'smooth',block:'center'})}return}if(t.hasAttribute('data-plan-focus-quick')){const tInput=$('#plan-q-title');if(tInput){tInput.focus();tInput.scrollIntoView({behavior:'smooth',block:'center'})}return}if(t.dataset.dur){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end');if(sInput&&eInput){document.querySelectorAll('.dur-pill').forEach(p=>p.classList.remove('active'));t.classList.add('active');const [h,m]=sInput.value.split(':').map(Number);const durMins=Number(t.dataset.dur);const endTotalMins=(h*60+m+durMins)%1440;const endH=Math.floor(endTotalMins/60),endM=endTotalMins%60;eInput.value=`${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`}return}if(t.id==='open-create-template-btn'){const card=$('#template-create-card');if(card){card.classList.toggle('hidden');if(!card.classList.contains('hidden')&&!$('#tpl-blocks-builder')?.children.length){addTemplateBlockRow('07:00','08:00','GYM & Stretch','Health');addTemplateBlockRow('08:00','09:00','Shower & Breakfast','Personal');addTemplateBlockRow('09:00','12:00','Deep Work / LeetCode','Career')}}return}if(t.id==='tpl-add-block-row'){addTemplateBlockRow();return}if(t.id==='tpl-create-cancel'){$('#template-create-card')?.classList.add('hidden');return}if(t.dataset.close){document.getElementById(t.dataset.close).close();return}if(t.hasAttribute('data-manage-classes')){openClasses();return}if(t.dataset.classEdit){const found=state.classes.find(c=>c.id===t.dataset.classEdit);if(found){state.editingClass=found.id;$('#class-name').value=found.name;$('#class-name-label').firstChild.textContent='Rename class';$('#save-class').textContent='Save name';$('#cancel-class-edit').classList.remove('hidden');$('#class-name').focus()}return}if(t.dataset.classDelete){await removeClass(t.dataset.classDelete);return}if(t.dataset.view){navigate(t.dataset.view);return}if(t.dataset.area){navigate('tasks',t.dataset.area);return}if(t.dataset.new){openEditor(t.dataset.new);return}if(t.dataset.toggle){await toggleTask(t.dataset.toggle);return}if(t.dataset.delete){await deleteItem(t.dataset.delete);return}if(t.dataset.edit){const item=state.items.find(x=>x.id===t.dataset.edit);if(item)openEditor(item.type,item);return}if(t.dataset.filter){state.filter=t.dataset.filter;render();return}if(t.dataset.ask){await ask(t.dataset.ask)}});
-document.addEventListener('change',async e=>{if(e.target.id==='health-date-picker'||e.target.id==='health-date-select'){if(e.target.value){state.healthDate=e.target.value;await loadHealthMetrics(state.healthDate,state.healthRange);render();}return}if(e.target.id==='hub-health-file-input'&&e.target.files?.[0]){await uploadHealthExportFile(e.target.files[0],$('#hub-upload-status'));e.target.value='';return}if(e.target.id==='modal-health-file-input'&&e.target.files?.[0]){await uploadHealthExportFile(e.target.files[0],$('#modal-upload-status'));e.target.value='';return}});
+document.addEventListener('click',async e=>{const t=e.target.closest('button,[data-edit],.event-card,.note-card,.mini-item,[data-task-sort],[data-new]');if(!t)return;if(t.dataset.taskSort){const field=t.dataset.taskSort;if(state.taskSortField===field){state.taskSortDir=state.taskSortDir==='asc'?'desc':'asc'}else{state.taskSortField=field;state.taskSortDir='asc'}render();return}if(t.id==='clear-task-search'){state.taskSearchQuery='';render();return}if(t.dataset.healthDateNav){const delta=Number(t.dataset.healthDateNav);const curr=state.healthDate||dayKey(new Date());state.healthDate=addDays(curr,delta);await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.hasAttribute('data-health-today')){state.healthDate=dayKey(new Date());await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.dataset.healthJumpDate){state.healthDate=t.dataset.healthJumpDate;await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.dataset.healthRange){state.healthRange=t.dataset.healthRange;await loadHealthMetrics(state.healthDate,state.healthRange);render();return}if(t.id==='hub-clear-health-btn'||t.id==='health-clear-data-btn'){await clearAllHealthData();return}if(t.id==='browse-hub-export-btn'){$('#hub-health-file-input')?.click();return}if(t.closest('#modal-health-dropzone')&&!t.closest('input')){$('#modal-health-file-input')?.click();return}if(t.dataset.quickWater){const delta=Number(t.dataset.quickWater);try{await api('/api/health/quick-log',{method:'POST',body:JSON.stringify({action:'add_water',amount_ml:delta})});await refresh();toast(delta>0?`+${delta}ml water logged 💧`:`${delta}ml water updated`)}catch(err){toast(err.message)}return}if(t.hasAttribute('data-open-health-setup')||t.id==='open-health-setup-btn'){await openHealthSetupModal();return}if(t.hasAttribute('data-open-health-quick-log')||t.id==='open-health-log-btn'){$('#health-quick-log-form')?.reset();$('#health-quick-log-dialog')?.showModal();return}if(t.closest('[data-health-jump]')){const healthArea=state.areas.find(a=>a.name.toLowerCase()==='health');if(healthArea)navigate('tasks',healthArea.id);return}if(t.dataset.copyTarget){const inp=document.getElementById(t.dataset.copyTarget);if(inp){await navigator.clipboard?.writeText(inp.value);const orig=t.textContent;t.textContent='Copied!';setTimeout(()=>{t.textContent=orig},1500);toast('Copied to clipboard')}return}if(t.id==='health-test-sync-btn'){try{t.disabled=true;t.textContent='Syncing…';const setupInfo=await api('/api/health/setup');await api('/api/health/sync',{method:'POST',headers:{'X-Health-Token':setupInfo.sync_token},body:JSON.stringify(setupInfo.sample_payload)});await refresh();$('#health-setup-dialog')?.close();toast('⚡ Verified Apple HealthKit test sync received!')}catch(err){toast(err.message)}finally{t.disabled=false;t.textContent='⚡ Send Test HealthKit Sync'}return}if(t.id==='health-refresh-btn'){await refresh();toast('Biometrics refreshed');return}if(t.dataset.waterAmount){const inp=$('#quick-log-water-input');if(inp)inp.value=t.dataset.waterAmount;return}if(t.dataset.healthType){document.querySelectorAll('#quick-log-type-row button').forEach(b=>b.classList.remove('selected'));t.classList.add('selected');const ty=t.dataset.healthType;$('#quick-log-water-panel')?.classList.toggle('hidden',ty!=='water');$('#quick-log-workout-panel')?.classList.toggle('hidden',ty!=='workout');$('#quick-log-weight-panel')?.classList.toggle('hidden',ty!=='weight');return}if(t.hasAttribute('data-action-start')){navigate('assistant');setTimeout(()=>{const input=$('#ask-form input');if(input){input.value='Research this target and draft a truthful personalized outreach message for my approval: ';input.focus()}},0);return}if(t.dataset.profileDelete){try{await api('/api/profile/'+t.dataset.profileDelete,{method:'DELETE'});await refresh();toast('Profile fact removed')}catch(err){toast(err.message)}return}if(t.dataset.actionDecision){try{await api('/api/external-actions/'+t.dataset.actionId+'/decision',{method:'POST',body:JSON.stringify({decision:t.dataset.actionDecision})});await refresh();toast(t.dataset.actionDecision==='approve'?'Draft approved':'Draft rejected')}catch(err){toast(err.message)}return}if(t.dataset.actionHandoff){try{const result=await api('/api/external-actions/'+t.dataset.actionHandoff+'/handoff',{method:'POST',body:'{}'});await navigator.clipboard?.writeText(result.action.body);await refresh();if(result.handoff_url)location.href=result.handoff_url;toast('Draft copied; handoff opened')}catch(err){toast(err.message)}return}if(t.dataset.actionComplete){try{await api('/api/external-actions/'+t.dataset.actionComplete+'/executed',{method:'POST',body:'{}'});await refresh();toast('Marked complete from your confirmation')}catch(err){toast(err.message)}return}if(t.dataset.groupToggle){const key=t.dataset.groupToggle;if(state.collapsedTaskGroups.has(key))state.collapsedTaskGroups.delete(key);else state.collapsedTaskGroups.add(key);render();return}if(t.dataset.planNav){state.planDay=addDays(state.planDay,Number(t.dataset.planNav));render();return}if(t.hasAttribute('data-plan-today')){state.planDay=dayKey(new Date());render();return}if(t.dataset.planAdd){openEditor('event',null,state.planDay,Number(t.dataset.planAdd));return}if(t.hasAttribute('data-open-templates')){openTemplatesModal();return}if(t.hasAttribute('data-open-save-template')){openSaveTemplateModal();return}if(t.dataset.planToggle){await toggleBlockDone(t.dataset.planToggle);return}if(t.dataset.planDuplicate){await duplicateBlock(t.dataset.planDuplicate);return}if(t.dataset.applyTemplate){await applyTemplate(t.dataset.applyTemplate,t.dataset.applyMode||'append');return}if(t.dataset.deleteTemplate){if(confirm('Delete this routine template?')){try{await api('/api/plan-templates/'+t.dataset.deleteTemplate,{method:'DELETE'});await refresh();toast('Template deleted')}catch(err){toast(err.message)}}return}if(t.dataset.quickApplyTplId){await applyTemplate(t.dataset.quickApplyTplId,'append');return}if(t.dataset.fillGapStart){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end'),tInput=$('#plan-q-title');if(sInput)sInput.value=t.dataset.fillGapStart;if(eInput)eInput.value=t.dataset.fillGapEnd;if(tInput){tInput.focus();tInput.scrollIntoView({behavior:'smooth',block:'center'})}return}if(t.hasAttribute('data-plan-focus-quick')){const tInput=$('#plan-q-title');if(tInput){tInput.focus();tInput.scrollIntoView({behavior:'smooth',block:'center'})}return}if(t.dataset.dur){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end');if(sInput&&eInput){document.querySelectorAll('.dur-pill').forEach(p=>p.classList.remove('active'));t.classList.add('active');const [h,m]=sInput.value.split(':').map(Number);const durMins=Number(t.dataset.dur);const endTotalMins=(h*60+m+durMins)%1440;const endH=Math.floor(endTotalMins/60),endM=endTotalMins%60;eInput.value=`${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`}return}if(t.id==='open-create-template-btn'){const card=$('#template-create-card');if(card){card.classList.toggle('hidden');if(!card.classList.contains('hidden')&&!$('#tpl-blocks-builder')?.children.length){addTemplateBlockRow('07:00','08:00','GYM & Stretch','Health');addTemplateBlockRow('08:00','09:00','Shower & Breakfast','Personal');addTemplateBlockRow('09:00','12:00','Deep Work / LeetCode','Career')}}return}if(t.id==='tpl-add-block-row'){addTemplateBlockRow();return}if(t.id==='tpl-create-cancel'){$('#template-create-card')?.classList.add('hidden');return}if(t.dataset.close){document.getElementById(t.dataset.close).close();return}if(t.hasAttribute('data-manage-classes')){openClasses();return}if(t.dataset.classEdit){const found=state.classes.find(c=>c.id===t.dataset.classEdit);if(found){state.editingClass=found.id;$('#class-name').value=found.name;$('#class-name-label').firstChild.textContent='Rename class';$('#save-class').textContent='Save name';$('#cancel-class-edit').classList.remove('hidden');$('#class-name').focus()}return}if(t.dataset.classDelete){await removeClass(t.dataset.classDelete);return}if(t.dataset.view){navigate(t.dataset.view);return}if(t.dataset.area){navigate('tasks',t.dataset.area);return}if(t.dataset.new){openEditor(t.dataset.new);return}if(t.dataset.toggle){await toggleTask(t.dataset.toggle);return}if(t.dataset.delete){await deleteItem(t.dataset.delete);return}if(t.dataset.edit){const item=state.items.find(x=>x.id===t.dataset.edit);if(item)openEditor(item.type,item);return}if(t.dataset.filter){state.filter=t.dataset.filter;render();return}if(t.dataset.ask){await ask(t.dataset.ask)}});
+document.addEventListener('change',async e=>{if(e.target.id==='task-type-filter'){state.taskTypeFilter=e.target.value;render();return}if(e.target.id==='health-date-picker'||e.target.id==='health-date-select'){if(e.target.value){state.healthDate=e.target.value;await loadHealthMetrics(state.healthDate,state.healthRange);render();}return}if(e.target.id==='hub-health-file-input'&&e.target.files?.[0]){await uploadHealthExportFile(e.target.files[0],$('#hub-upload-status'));e.target.value='';return}if(e.target.id==='modal-health-file-input'&&e.target.files?.[0]){await uploadHealthExportFile(e.target.files[0],$('#modal-upload-status'));e.target.value='';return}});
 ['dragenter','dragover'].forEach(name=>{document.addEventListener(name,e=>{const dropzone=e.target.closest('#hub-health-dropzone,#modal-health-dropzone');if(dropzone){e.preventDefault();dropzone.classList.add('drag-over')}})});
 ['dragleave'].forEach(name=>{document.addEventListener(name,e=>{const dropzone=e.target.closest('#hub-health-dropzone,#modal-health-dropzone');if(dropzone&&!dropzone.contains(e.relatedTarget)){dropzone.classList.remove('drag-over')}})});
 document.addEventListener('drop',async e=>{const dropzone=e.target.closest('#hub-health-dropzone,#modal-health-dropzone');if(dropzone){e.preventDefault();dropzone.classList.remove('drag-over');const file=e.dataTransfer?.files?.[0];if(file){const statusEl=dropzone.querySelector('.upload-status');await uploadHealthExportFile(file,statusEl)}}});
 $('#content').addEventListener('change',async e=>{if(e.target.matches('[data-quick-apply-template]')&&e.target.value){const tplId=e.target.value;e.target.value='';await applyTemplate(tplId,'append');return}if(!e.target.matches('[data-plan-date]')||!e.target.value)return;try{fromDayKey(e.target.value);state.planDay=e.target.value;render()}catch{toast('Choose a valid date')}});
-document.addEventListener('input',e=>{if(e.target.id==='plan-q-title'){const parsed=parseTimeBlockString(e.target.value);if(parsed){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end');if(sInput)sInput.value=parsed.start;if(eInput)eInput.value=parsed.end}}});
+document.addEventListener('input',e=>{if(e.target.id==='task-table-search'){state.taskSearchQuery=e.target.value;const pos=e.target.selectionStart;render();const searchInput=document.getElementById('task-table-search');if(searchInput){searchInput.focus();searchInput.setSelectionRange(pos,pos)}return}if(e.target.id==='plan-q-title'){const parsed=parseTimeBlockString(e.target.value);if(parsed){const sInput=$('#plan-q-start'),eInput=$('#plan-q-end');if(sInput)sInput.value=parsed.start;if(eInput)eInput.value=parsed.end}}});
 $('#new-main').addEventListener('click',()=>openEditor(singular[state.view]||'task'));
 $('#entry-form').addEventListener('submit',saveEntry);
 $('#entry-date').addEventListener('change',()=>{if(state.entryType!=='event')return;const start=$('#entry-date').value,end=$('#entry-end').value;if(start&&(!end||new Date(end)<=new Date(start)))$('#entry-end').value=localInput(new Date(new Date(start).getTime()+3600000))});
