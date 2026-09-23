@@ -267,7 +267,7 @@ const STRIP_WHEN=new RegExp([
   '\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?\\b',
   '\\b(?:at\\s+)?\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)\\b',
   '\\b(?:at|by)\\s+\\d{1,2}(?::\\d{2})?\\b',
-  '\\bthis (?:morning|afternoon|evening|night)\\b',
+  '\\b(?:this|tomorrow|tmrw|today|yesterday|next)?\\s*(?:morning|afternoon|evening|tonight|night)\\b',
   `\\b(?:${VAGUE_PHRASES.map(phrase=>escapeRegExp(phrase)).join('|')})\\b`
 ].join('|'),'gi');
 const COMMAND_PREFIX=/^(?:\s*(?:ok(?:ay)?|please|hey|hi|yo|so|now|also|and|then)[\s,]+)+/i;
@@ -283,7 +283,7 @@ export function removePhrase(text, phrase) {
 
 // A course code someone typed that does not match a saved class yet, such as
 // "math 2210" or "@cs3600". It becomes an offer to create that class.
-const COURSE_MENTION=/(?:@([a-z][a-z0-9 .-]{1,14})|\b(?:in|for|from|during|class|course)\s+([a-z]{2,5}\s?-?\d{3,4}[a-z]?)\b)/i;
+const COURSE_MENTION=/(?:@([a-z][a-z0-9 .-]{1,14})|\b(?:in|for|from|during|class|course)\s+(?:the\s+)?([a-z]{2,5}\s?-?\d{3,4}[a-z]?)\b)/i;
 export function courseMention(text) {
   const found=String(text??'').match(COURSE_MENTION);
   if (!found) return '';
@@ -362,7 +362,8 @@ export function heuristicDraft(input, context={}) {
   if (classMatch.match) title=removePhrase(title,classMatch.match.name);
   else if (mention) title=removePhrase(title,mention);
   if (areaMatch.match) title=removePhrase(title,areaMatch.match.name);
-  title=cleanTitle(title.replace(STRIP_WHEN,' '))||cleanTitle(original.replace(STRIP_WHEN,' '))||original;
+  const STRIP_PRIORITY=/\b(high priority|low priority|medium priority|urgent|top priority|asap|no rush|not urgent)\b/gi;
+  title=cleanTitle(title.replace(STRIP_WHEN,' ').replace(STRIP_PRIORITY,' '))||cleanTitle(original.replace(STRIP_WHEN,' ').replace(STRIP_PRIORITY,' '))||original;
 
   const needs=[];
   if (dated&&(!when.matched||when.vague)) needs.push('date');
@@ -408,14 +409,19 @@ export function extractDirectIntent(input, context={}) {
   // Generic or vague creation requests must be handled through standard agent reasoning
   if (/^(?:create|add|make|new)\s+(?:a|an|one|two|three|some|\d+)?\s*(?:task|item|event|milestone)s?$/i.test(lower)) return null;
 
-  // If a specific course code is mentioned that is not a registered class yet, let the agent manage class creation
-  if (courseMention(original)) return null;
+  // If an unregistered course code is mentioned, let the agent handle class creation
+  const isRegisteredClass = matchEntity(original, context.classes || []).match;
+  if (!isRegisteredClass && courseMention(original)) return null;
 
   // Unambiguous conversational additions like "I have a Superhuman SWE OA due in 7 days can you please add it to tasks"
   const isConversationalAdd = /^(?:i have|i got|there is|there's|got|we have)\s+/i.test(lower) && /\b(?:add (?:it|this)?\s*to\s*(?:my\s*)?tasks?|task|due)\b/i.test(lower);
 
-  if (isConversationalAdd) {
+  // Spoken voice additions & direct imperatives (e.g. "Add a reminder to submit LMC 3403 proposal by Thursday 5pm high priority")
+  const isVoiceOrDirectAdd = /^(?:add(?:\s+a)?\s+(?:reminder|task|event|note|goal)|remind\s+me\s+to|schedule(?:\s+a)?|put)\s+.+/i.test(lower);
+
+  if (isConversationalAdd || isVoiceOrDirectAdd) {
     const draft = heuristicDraft(original, context);
+    if (draft && draft.class_name && !draft.class_id) return null;
     if (draft && draft.title && draft.title.length >= 3 && !/^(?:task|item|new task|something)$/i.test(draft.title)) {
       return {
         intent: 'create',

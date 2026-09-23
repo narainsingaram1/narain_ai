@@ -23,7 +23,19 @@ function applyTheme(mode = storedTheme()) {
 applyTheme();
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state = { areas:[], classes:[], items:[], view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false,agentRun:null,aiSettings:null };
+function getChatSessionId() {
+  try {
+    let id = localStorage.getItem('orbit-chat-session');
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'session_' + Math.random().toString(36).slice(2);
+      localStorage.setItem('orbit-chat-session', id);
+    }
+    return id;
+  } catch {
+    return 'default-session';
+  }
+}
+const state = { areas:[], classes:[], items:[], view:'today', area:null, filter:'open', editing:null, entryType:'task', editingClass:null, calendarMode:'month', selectedDay:dayKey(new Date()), planDay:dayKey(new Date()), movingEventId:null,collapsedTaskGroups:new Set(),chat:[],agentBusy:false,agentRun:null,aiSettings:null,sessionId:getChatSessionId() };
 const labels = {today:'Today',plan:'Daily plan',tasks:'Tasks',calendar:'Calendar',notes:'Notes',journal:'Journal',goals:'Goals',assistant:'Ask Orbit'};
 const singular = {tasks:'task',plan:'event',notes:'note',journal:'journal',goals:'goal',calendar:'event'};
 const dateKey = dayKey;
@@ -40,10 +52,27 @@ async function loadAiSettings() {
     state.aiSettings = data;
     const label = $('#ai-provider-label');
     if (label) label.textContent = `${data.provider} (${data.model})`;
+    if ($('#ai-active-provider')) $('#ai-active-provider').value = data.active_provider || '';
+    if ($('#ai-openrouter-model') && !$('#ai-openrouter-model').value) $('#ai-openrouter-model').value = data.openrouter_model || '';
     if ($('#ai-ollama-model') && !$('#ai-ollama-model').value) $('#ai-ollama-model').value = data.model || 'qwen3.5:4b';
   } catch {}
 }
-async function refresh(){const data=await api('/api/state');state.areas=data.areas;state.classes=data.classes;state.items=data.items;await loadAiSettings();render();if($('#editor').open)renderClassOptions($('#entry-class').value);if($('#classes-dialog').open)renderClasses()}
+async function loadChatHistory() {
+  try {
+    const history = await api(`/api/chat/history?session_id=${encodeURIComponent(state.sessionId)}`);
+    if (Array.isArray(history) && history.length && !state.chat.length) {
+      state.chat = history.map(item => ({
+        kind: item.role === 'user' ? 'user' : 'answer',
+        message: item.content,
+        sources: item.sources || [],
+        changes: [],
+        proposal: null
+      }));
+      renderChat();
+    }
+  } catch {}
+}
+async function refresh(){const data=await api('/api/state');state.areas=data.areas;state.classes=data.classes;state.items=data.items;await loadAiSettings();await loadChatHistory();render();if($('#editor').open)renderClassOptions($('#entry-class').value);if($('#classes-dialog').open)renderClasses()}
 function area(id){return state.areas.find(a=>a.id===id)}
 function isAcademic(id){return area(id)?.name==='Academics'}
 function renderClassOptions(selected=''){const select=$('#entry-class');select.innerHTML='<option value="">No class</option>'+state.classes.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');select.value=state.classes.some(c=>c.id===selected)?selected:''}
@@ -310,7 +339,7 @@ function endAgentRun() {
   renderAgentActivity();setAgentBusyUI();
 }
 async function streamAsk(question,live) {
-  const response=await fetch('/api/assistant/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question})});
+  const response=await fetch('/api/assistant/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,session_id:state.sessionId})});
   if (!response.ok) {let data={};try{data=await response.json()}catch{}throw new Error(data.error||'The local agent could not start.')}
   if (!response.body || response.headers.get('content-type')?.includes('application/json')) {
     const result=await response.json();receiveAgentEvent({type:'answer',...result},live);receiveAgentEvent({type:'done'},live);return;
@@ -374,6 +403,9 @@ document.addEventListener('submit',e=>{if(e.target.id==='ask-form'){e.preventDef
 function openAiSettings() {
   const label = $('#ai-provider-label');
   if (label && state.aiSettings) label.textContent = `${state.aiSettings.provider} (${state.aiSettings.model})`;
+  if ($('#ai-active-provider') && state.aiSettings) $('#ai-active-provider').value = state.aiSettings.active_provider || '';
+  if ($('#ai-openrouter-model') && state.aiSettings) $('#ai-openrouter-model').value = state.aiSettings.openrouter_model || '';
+  if ($('#ai-ollama-model') && state.aiSettings) $('#ai-ollama-model').value = state.aiSettings.model || '';
   $('#ai-settings-dialog')?.showModal();
 }
 $('#ai-settings-open')?.addEventListener('click', openAiSettings);
@@ -381,12 +413,16 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-open-ai-settings]')) openAiSettings();
 });
 $('#ai-save-settings')?.addEventListener('click', async () => {
+  const active_provider = $('#ai-active-provider')?.value;
   const groq_api_key = $('#ai-groq-key')?.value.trim();
   const openrouter_api_key = $('#ai-openrouter-key')?.value.trim();
+  const openrouter_model = $('#ai-openrouter-model')?.value.trim();
   const orbit_model = $('#ai-ollama-model')?.value.trim();
   const payload = {};
+  if (active_provider !== undefined) payload.active_provider = active_provider;
   if (groq_api_key !== undefined && groq_api_key !== '') payload.groq_api_key = groq_api_key;
   if (openrouter_api_key !== undefined && openrouter_api_key !== '') payload.openrouter_api_key = openrouter_api_key;
+  if (openrouter_model) payload.openrouter_model = openrouter_model;
   if (orbit_model) payload.orbit_model = orbit_model;
   try {
     const updated = await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
@@ -407,6 +443,109 @@ $('#theme-select').addEventListener('change', e => {
 const followSystemTheme = () => {
   if (document.documentElement.dataset.themeMode === 'system') applyTheme('system');
 };
-if (themeQuery.addEventListener) themeQuery.addEventListener('change', followSystemTheme);
-else themeQuery.addListener(followSystemTheme);
+// Voice Quick-Capture
+let activeRecognition = null;
+let voiceTranscribedText = '';
+
+function initVoiceCapture() {
+  const btn = $('#voice-capture-btn');
+  const overlay = $('#voice-overlay');
+  const transcriptEl = $('#voice-transcript');
+  const closeBtn = $('#voice-close-btn');
+  if (!btn) return;
+
+  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function stopVoice(cancel = false) {
+    if (activeRecognition) {
+      const rec = activeRecognition;
+      activeRecognition = null;
+      try { rec.stop(); } catch {}
+    }
+    btn?.classList.remove('is-recording');
+    overlay?.classList.add('hidden');
+    if (cancel) voiceTranscribedText = '';
+  }
+
+  function handleVoiceFinalize() {
+    const textToProcess = voiceTranscribedText.trim();
+    stopVoice(false);
+    if (textToProcess) {
+      toast(`Heard: “${textToProcess}”`);
+      ask(textToProcess);
+    }
+  }
+
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('is-recording')) {
+      handleVoiceFinalize();
+      return;
+    }
+
+    if (!SpeechClass) {
+      toast('Speech recognition not supported in this browser (Chrome / Safari recommended).');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechClass();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      voiceTranscribedText = '';
+      if (transcriptEl) transcriptEl.textContent = 'Listening… speak your task, reminder, or event.';
+      btn.classList.add('is-recording');
+      overlay?.classList.remove('hidden');
+
+      recognition.onstart = () => {
+        activeRecognition = recognition;
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        let final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          if (item.isFinal) final += item[0].transcript;
+          else interim += item[0].transcript;
+        }
+        const current = (final || interim).trim();
+        if (current) {
+          voiceTranscribedText = current;
+          if (transcriptEl) transcriptEl.textContent = current;
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          toast('Microphone access denied. Please grant microphone permission.');
+        } else if (event.error !== 'no-speech') {
+          toast(`Voice error: ${event.error}`);
+        }
+        stopVoice(true);
+      };
+
+      recognition.onend = () => {
+        if (activeRecognition) {
+          handleVoiceFinalize();
+        }
+      };
+
+      recognition.start();
+    } catch (err) {
+      console.error(err);
+      toast('Could not start microphone: ' + err.message);
+      stopVoice(true);
+    }
+  });
+
+  closeBtn?.addEventListener('click', () => {
+    stopVoice(true);
+    toast('Voice capture cancelled.');
+  });
+}
+initVoiceCapture();
+
 refresh().catch(err=>{toast(err.message);$('#content').innerHTML=empty('Could not load your workspace. Check that the server is running.')});

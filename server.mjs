@@ -4,6 +4,7 @@ import { join, extname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { cleanTitle, extractDirectIntent, heuristicDraft, heuristicDrafts, matchEntity, parseWhen, rankEntities, zoneOffsetMinutes, zoneParts, zonedStamp } from './parse.mjs';
+import { initMemorySchema, saveMemory, listMemories, deleteMemory, hybridRetrieveMemories, saveChatMessage, getChatMessages, getOrCreateChatSession } from './memory.mjs';
 
 try {
   if (typeof process.loadEnvFile === 'function') {
@@ -16,6 +17,7 @@ const dataDir = process.env.ORBIT_DATA_DIR || join(root, 'data');
 await mkdir(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, 'orbit.sqlite'), { timeout: 5000 });
 db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+initMemorySchema(db);
 db.exec(`
 CREATE TABLE IF NOT EXISTS settings (
  key TEXT PRIMARY KEY, value TEXT NOT NULL
@@ -102,6 +104,8 @@ try {
     if (row.key === 'openrouter_api_key' && !process.env.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = row.value;
     if (row.key === 'groq_model' && !process.env.GROQ_MODEL) process.env.GROQ_MODEL = row.value;
     if (row.key === 'openrouter_model' && !process.env.OPENROUTER_MODEL) process.env.OPENROUTER_MODEL = row.value;
+    if (row.key === 'active_provider' && !process.env.ORBIT_AI_PROVIDER) process.env.ORBIT_AI_PROVIDER = row.value;
+    if (row.key === 'orbit_model' && !process.env.ORBIT_MODEL) process.env.ORBIT_MODEL = row.value;
   }
 } catch {}
 
@@ -115,7 +119,17 @@ const text = (v,max=5000) => typeof v === 'string' ? v.trim().slice(0,max) : '';
 const maybeDate = v => v === null || v === '' || v === undefined ? null : Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : undefined;
 
 function getAiProvider() {
-  if (process.env.GROQ_API_KEY) {
+  const chosen = process.env.ORBIT_AI_PROVIDER;
+  if (chosen === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+    return {
+      type: 'openai_compatible',
+      name: 'OpenRouter',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      apiKey: process.env.OPENROUTER_API_KEY,
+      model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+    };
+  }
+  if (chosen === 'groq' && process.env.GROQ_API_KEY) {
     return {
       type: 'openai_compatible',
       name: 'Groq (Free Cloud)',
@@ -131,6 +145,15 @@ function getAiProvider() {
       url: 'https://openrouter.ai/api/v1/chat/completions',
       apiKey: process.env.OPENROUTER_API_KEY,
       model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+    };
+  }
+  if (process.env.GROQ_API_KEY) {
+    return {
+      type: 'openai_compatible',
+      name: 'Groq (Free Cloud)',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
     };
   }
   return {
@@ -245,6 +268,7 @@ const agentTools = [
   {type:'function',function:{name:'get_record',description:'Read one complete Orbit record by exact ID before editing or deleting it.',parameters:{type:'object',properties:{id:{type:'string'}},required:['id']}}},
   {type:'function',function:{name:'find_entity',description:'Look up the exact ID of an academic class or life area by the name the user said, such as "cs 3600". Use this whenever the user names a class or area; the names shown in the workspace metadata are suggestions only, so verify before linking.',parameters:{type:'object',properties:{kind:{type:'string',enum:['class','area']},name:{type:'string'}},required:['kind','name']}}},
   {type:'function',function:{name:'create_class',description:'Create an academic class the user wants tracked when it does not exist yet. After this call, link records to it with fields.class_name.',parameters:{type:'object',properties:{name:{type:'string'}},required:['name']}}},
+  {type:'function',function:{name:'remember_memory',description:'Save a long-term memory, user preference, habit, or important fact to the user\'s Second Brain so Orbit remembers it forever.',parameters:{type:'object',properties:{category:{type:'string',enum:['preference','habit','fact','project_context','reflection']},content:{type:'string'},importance:{type:'integer',minimum:1,maximum:5}},required:['category','content']}}},
   {type:'function',function:{name:'propose_changes',description:'Submit one atomic batch of creates, updates, or deletes. Each create MUST have fields.type and fields.title. Name a class with fields.class_name and a life area with fields.area_name exactly as the user said them; the server resolves them and links Academics automatically, so never pass class_id or area_id yourself. Put the user\'s own date wording in fields.when ("friday", "next week", "sep 25 at 5pm") and the server converts it; never invent a timestamp and never pass when for a vague word such as "soon" — leave the date unset instead. Link a project milestone with parent_match (the source task title) or fields.parent_id. Give every update and delete a top-level match holding a distinctive part of the record title; the server resolves it and refuses when several records fit. Use id only when get_record already returned it.',parameters:{type:'object',properties:{explanation:{type:'string'},changes:{type:'array',items:{type:'object',properties:{op:{type:'string',enum:['create','update','delete']},match:{type:'string'},parent_match:{type:'string'},id:{type:'string'},expected_updated_at:{type:'string'},fields:{type:'object',properties:{type:{type:'string',enum:['task','note','journal','goal','event']},title:{type:'string'},body:{type:'string'},area_id:{type:'string'},area_name:{type:'string'},class_id:{type:'string'},class_name:{type:'string'},parent_id:{type:'string'},when:{type:'string'},due_at:{type:'string'},starts_at:{type:'string'},ends_at:{type:'string'},status:{type:'string',enum:['open','done','archived']},priority:{type:'string',enum:['low','medium','high']}}}},required:['op','fields']}}},required:['changes','explanation']}}}
 ];
 const agentSystem = () => `You are Orbit, an ultra-fast, proactive personal OS agent. Today is ${new Date().toLocaleString('en-US',{timeZone,dateStyle:'full',timeStyle:'short'})} in the ${timeZone} time zone.
@@ -459,7 +483,8 @@ const toolLabels = {
   get_record:'Opening the matching record',
   propose_changes:'Preparing a safe change preview',
   find_entity:'Looking up that class or area',
-  create_class:'Creating the class'
+  create_class:'Creating the class',
+  remember_memory:'Updating Second Brain memory'
 };
 function toolLabel(name) { return toolLabels[name] || 'Working with your workspace'; }
 function mergeToolCalls(target,incoming) {
@@ -615,9 +640,21 @@ async function aiChat(messages,remainingMs,onToken=null) {
 
 const ollamaChat = aiChat;
 
-async function agent(question,onEvent=()=>{}) {
+async function agent(question,onEvent=()=>{},sessionId='default-session') {
   const emit=event=>{try{onEvent(event)}catch{}};
-  const finish=result=>{emit({type:'answer',...result});emit({type:'done'});return result};
+  const finish=result=>{
+    emit({type:'answer',...result});
+    emit({type:'done'});
+    try {
+      saveChatMessage(db, sessionId, { role: 'user', content: q });
+      saveChatMessage(db, sessionId, { role: 'assistant', content: result.answer, sources: result.sources });
+      const memMatch = q.match(/^(?:remember(?:\s+that)?|note(?:\s+that)?|keep\s+in\s+mind(?:\s+that)?|i\s+prefer|my\s+preference\s+is)\s+(.+)/i);
+      if (memMatch && memMatch[1]?.trim().length >= 4) {
+        saveMemory(db, { category: 'preference', content: memMatch[1].trim(), importance: 4, sourceType: 'chat' }).catch(() => {});
+      }
+    } catch {}
+    return result;
+  };
   const q=text(question,500);
   if (!q) throw Object.assign(new Error('Ask Orbit to do something first'),{status:400});
 
@@ -663,11 +700,28 @@ async function agent(question,onEvent=()=>{}) {
     }
   }
 
+  // 2. Second Brain Hybrid Memory & Dialogue History
+  let memoryContext = '';
+  try {
+    const relevantMemories = await hybridRetrieveMemories(db, q, 3);
+    if (relevantMemories.length) {
+      memoryContext = `\nRELEVANT SECOND BRAIN MEMORIES (implicit user context):\n${relevantMemories.map(m => `- [${m.category}] ${m.content}`).join('\n')}\n`;
+    }
+  } catch {}
+
+  let historyContext = '';
+  try {
+    const history = getChatMessages(db, sessionId, 6);
+    if (history.length) {
+      historyContext = `\nRECENT CONVERSATION HISTORY:\n${history.map(h => `${h.role === 'user' ? 'User' : 'Orbit'}: ${h.content}`).join('\n')}\n`;
+    }
+  } catch {}
+
   emit({type:'start',model:provider.model});
   const mutationRequested=/\b(create|add|update|reschedule|move|delete|remove|break down|split|mark|complete|archive|edit|change)\b/i.test(q);
   const isCreateIntent = /\b(create|add|schedule|track|save|remind|new)\b/i.test(q) && !/\b(update|delete|remove|mark|complete|archive)\b/i.test(q);
   const promptNotice = isCreateIntent ? ' This is a request to create a new record. Do NOT search records first. Call propose_changes with op:"create" directly.' : '';
-  const messages=[{role:'system',content:`${agentSystem()}${promptNotice}`},{role:'user',content:`Workspace lookup metadata: ${JSON.stringify({areas:context.areas,classes:context.classes})}\nRequest: ${q}`}];
+  const messages=[{role:'system',content:`${agentSystem()}${promptNotice}${memoryContext}${historyContext}`},{role:'user',content:`Workspace lookup metadata: ${JSON.stringify({areas:context.areas,classes:context.classes})}\nRequest: ${q}`}];
   const readIds=new Map();
   const sources=new Map();
   const deadline=Date.now()+120000;
@@ -825,6 +879,15 @@ async function agent(question,onEvent=()=>{}) {
         const record=db.prepare(`${selectItems} WHERE i.id=?`).get(args.id);
         if (record) readIds.set(record.id,record.updated_at);
         result=record?{...record,body:record.body.slice(0,4000)}:{error:'Record not found'};
+      }
+      else if (name==='remember_memory') {
+        const cat=['preference','habit','fact','project_context','reflection'].includes(args.category)?args.category:'fact';
+        const txt=text(args.content,1000);
+        if (!txt) result={error:'Memory content is required'};
+        else {
+          const mem=await saveMemory(db,{category:cat,content:txt,importance:Math.min(Math.max(Number(args.importance)||3,1),5),sourceType:'agent'});
+          result={saved:true,memory:{id:mem.id,category:mem.category,content:mem.content}};
+        }
       } else result={error:'Unknown tool'};
       if (Array.isArray(result)) for (const item of result) sources.set(item.id,{id:item.id,title:item.title,type:item.type});
       else if (result?.id) sources.set(result.id,{id:result.id,title:result.title||result.name,type:result.type||'class'});
@@ -957,12 +1020,18 @@ const server = http.createServer(async (req,res) => {
           provider: p.name,
           type: p.type,
           model: p.model,
+          active_provider: process.env.ORBIT_AI_PROVIDER || (process.env.OPENROUTER_API_KEY ? 'openrouter' : process.env.GROQ_API_KEY ? 'groq' : 'ollama'),
           has_groq: Boolean(process.env.GROQ_API_KEY),
-          has_openrouter: Boolean(process.env.OPENROUTER_API_KEY)
+          has_openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+          openrouter_model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
         });
       }
       if (req.method==='POST' && url.pathname==='/api/settings') {
         const input = await readJson(req);
+        if (input.active_provider !== undefined) {
+          process.env.ORBIT_AI_PROVIDER = text(input.active_provider, 50);
+          db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?').run('active_provider', process.env.ORBIT_AI_PROVIDER, process.env.ORBIT_AI_PROVIDER);
+        }
         if (input.groq_api_key !== undefined) {
           process.env.GROQ_API_KEY = text(input.groq_api_key, 200);
           db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?').run('groq_api_key', process.env.GROQ_API_KEY, process.env.GROQ_API_KEY);
@@ -989,9 +1058,29 @@ const server = http.createServer(async (req,res) => {
           provider: p.name,
           type: p.type,
           model: p.model,
+          active_provider: process.env.ORBIT_AI_PROVIDER || (process.env.OPENROUTER_API_KEY ? 'openrouter' : process.env.GROQ_API_KEY ? 'groq' : 'ollama'),
           has_groq: Boolean(process.env.GROQ_API_KEY),
-          has_openrouter: Boolean(process.env.OPENROUTER_API_KEY)
+          has_openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+          openrouter_model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
         });
+      }
+      if (req.method==='GET' && url.pathname==='/api/memories') {
+        const cat = url.searchParams.get('category');
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit'))||50, 1), 200);
+        return send(res, 200, listMemories(db, { category: cat, limit }));
+      }
+      if (req.method==='POST' && url.pathname==='/api/memories') {
+        const input = await readJson(req);
+        const mem = await saveMemory(db, input);
+        return send(res, 201, mem);
+      }
+      const memMatch = url.pathname.match(/^\/api\/memories\/([0-9a-f-]+)$/);
+      if (memMatch && req.method==='DELETE') {
+        return send(res, 200, deleteMemory(db, memMatch[1]));
+      }
+      if (req.method==='GET' && url.pathname==='/api/chat/history') {
+        const sessionId = url.searchParams.get('session_id') || 'default-session';
+        return send(res, 200, getChatMessages(db, sessionId));
       }
       if (req.method==='GET' && url.pathname==='/api/items') return send(res,200,listItems(url.searchParams));
       if (req.method==='POST' && url.pathname==='/api/items') {
@@ -1021,7 +1110,7 @@ const server = http.createServer(async (req,res) => {
       }
       if (req.method==='POST' && url.pathname==='/api/assistant') {
         const input=await readJson(req);
-        return send(res,200,input.mode==='search'?assistant(input.question):await agent(input.question));
+        return send(res,200,input.mode==='search'?assistant(input.question):await agent(input.question,()=>{},input.session_id||'default-session'));
       }
       if (req.method==='POST' && url.pathname==='/api/assistant/stream') {
         const input=await readJson(req);
@@ -1032,7 +1121,7 @@ const server = http.createServer(async (req,res) => {
             writeEvent(res,{type:'answer',...result});
             writeEvent(res,{type:'done'});
           } else {
-            await agent(input.question,event=>writeEvent(res,event));
+            await agent(input.question,event=>writeEvent(res,event),input.session_id||'default-session');
           }
         } catch(error) {
           writeEvent(res,{type:'error',error:error.message||'The local agent could not complete the request.'});

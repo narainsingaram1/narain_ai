@@ -72,3 +72,54 @@ test('older academic course text migrates into editable classes', async () => {
     assert.equal(state.items[0].class_id,state.classes[0].id);
   } finally {child.kill('SIGTERM');await rm(dir,{recursive:true,force:true})}
 });
+
+test('Second Brain memory and conversation history endpoints', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'orbit-mem-api-'));
+  const port = 35000 + Math.floor(Math.random() * 20000);
+  const base = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ['server.mjs'], {
+    cwd: join(import.meta.dirname, '..'),
+    env: { ...process.env, ORBIT_DATA_DIR: dir, PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Server startup timed out')), 5000);
+      child.stdout.on('data', data => { if (data.toString().includes('Orbit is running')) { clearTimeout(timer); resolve(); } });
+      child.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited: ${code}`)); });
+    });
+    async function request(path, method = 'GET', body) {
+      const res = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, data: await res.json() };
+    }
+
+    // 1. Create a memory
+    const created = await request('/api/memories', 'POST', {
+      category: 'preference',
+      content: 'Prefers morning study sessions and dark mode',
+      importance: 5
+    });
+    assert.equal(created.status, 201);
+    assert.ok(created.data.id);
+    assert.equal(created.data.category, 'preference');
+
+    // 2. List memories
+    const list = await request('/api/memories');
+    assert.equal(list.status, 200);
+    assert.equal(list.data.length, 1);
+    assert.equal(list.data[0].content, 'Prefers morning study sessions and dark mode');
+
+    // 3. Delete memory
+    const del = await request(`/api/memories/${created.data.id}`, 'DELETE');
+    assert.equal(del.status, 200);
+    assert.equal((await request('/api/memories')).data.length, 0);
+
+    // 4. Verify settings active_provider
+    const settings = await request('/api/settings', 'POST', { active_provider: 'openrouter', openrouter_model: 'anthropic/claude-3.5-sonnet' });
+    assert.equal(settings.status, 200);
+    assert.equal(settings.data.active_provider, 'openrouter');
+  } finally {
+    child.kill('SIGTERM');
+    await rm(dir, { recursive: true, force: true });
+  }
+});
